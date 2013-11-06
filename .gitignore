@@ -1,0 +1,5 @@
+obj-intel64
+*.so
+*.o
+lock_mt.out.*
+*.log
