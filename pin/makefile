@@ -76,6 +76,9 @@ TOOLS = $(TOOL_ROOTS:%=$(OBJDIR)%$(PINTOOL_SUFFIX))
 ##############################################################
 
 all: tools
+	make -C libbloom/
+	make -C YOOP/
+	make -C adt/
 tools: $(OBJDIR) $(TOOLS) $(OBJDIR)cp-pin.exe
 test: $(OBJDIR) $(TOOL_ROOTS:%=%.test)
 
@@ -100,3 +103,6 @@ $(TOOLS): %$(PINTOOL_SUFFIX) : %.o
 ## cleaning
 clean:
 	-rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
+	make -C libbloom clean
+	make -C YOOP clean
+	make -C adt clean

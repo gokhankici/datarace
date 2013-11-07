@@ -3,3 +3,4 @@ obj-intel64
 *.o
 lock_mt.out.*
 *.log
+*.swp

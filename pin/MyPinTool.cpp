@@ -24,6 +24,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	string filename = KnobOutputFile.Value() +"." + decstr(*id);
 	FILE* out       = fopen(filename.c_str(), "w");
+	//FILE* out = stderr;
 	fprintf(out, "thread begins... MYID:%u PIN_TID:%d OS_TID:0x%x\n",(*id),threadid,PIN_GetTid());
 	fflush(out);
 	PIN_SetThreadData(tls_key, out, threadid);
@@ -32,7 +33,7 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 // This routine is executed every time a thread is destroyed.
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
-	FILE*out   = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
 	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
 	fclose(out);
 	delete id;
@@ -47,7 +48,14 @@ VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadid)
 	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
 	timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
-	fprintf(out, "thread(%u)::pthread_mutex_lock(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
+	if ((void*) mutex != (void*) &lock)
+	{
+		fprintf(out, "thread(%u)::pthread_mutex_lock(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
+	}
+	else 
+	{
+		fprintf(stderr, "In our lock\n");
+	}
 
 }
 
@@ -57,14 +65,20 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadid)
 	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
 	timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
-	fprintf(out, "thread(%u)::pthread_mutex_unlock(%p)::time(%ld,%ld)\n", (*id),mutex,ts.tv_sec,ts.tv_nsec);
+	if ((void*) mutex != (void*) &lock) 
+	{
+		fprintf(out, "thread(%u)::pthread_mutex_unlock(%p)::time(%ld,%ld)\n", (*id),mutex,ts.tv_sec,ts.tv_nsec);
+	}
+	else 
+	{
+		fprintf(stderr, "In our lock\n");
+	}
 }
 
 // This routine is executed for each image.
 VOID ImageLoad (IMG img, VOID *)
 {
 	RTN rtn = RTN_FindByName(img, "pthread_mutex_lock");
-
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
@@ -75,7 +89,6 @@ VOID ImageLoad (IMG img, VOID *)
 	}
 
 	rtn = RTN_FindByName(img, "pthread_mutex_unlock");
-
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
