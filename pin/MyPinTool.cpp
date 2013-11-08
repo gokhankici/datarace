@@ -2,6 +2,7 @@
 #include <time.h>
 #include <list>
 #include <map>
+#include <assert.h>
 #include "pin.H"
 
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
@@ -11,133 +12,145 @@
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
 		"o", "lock_mt.out", "specify output file name");
 
-typedef std::map< long, std::list<UINT32>* >::iterator WaitQueueIterator;
-typedef std::map< long, UINT32 >::iterator SignalledThreadIterator;
+typedef std::list<UINT32> WaitQueue;
+typedef std::map< long, WaitQueue* > WaitQueueMap;
+typedef WaitQueueMap::iterator WaitQueueIterator;
+
+struct STI 
+{
+	UINT32 threadId;
+	vector<UINT32>* vectorClock;
+
+	STI() : threadId(NO_ID), vectorClock(NULL) {}
+	STI(UINT32 threadId, vector<UINT32>* vc) :
+		threadId(threadId), vectorClock(vc) {}
+};
+typedef struct STI SignalThreadInfo;
+typedef std::map< long, SignalThreadInfo > SignalThreadMap;
+typedef SignalThreadMap::iterator SignalThreadIterator;
 
 // thread local storage
 TLS_KEY tlsKey;
-TLS_KEY idKey;
 TLS_KEY mutexPtrKey;
+TLS_KEY vectorClockKey;
 
 UINT32 globalId=0;
 PIN_LOCK lock;
 
-std::map< long, std::list<UINT32>* >* waitQueue;
-std::map< long, UINT32 >* signalledThread;
+WaitQueueMap* waitQueueMap;
+SignalThreadMap* signalledThreadMap;
 
 // This routine is executed every time a thread is created.
-VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
+VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	UINT32* id = new UINT32;
-	GetLock(&lock, threadid+1);
+	GetLock(&lock, threadId+1);
 	++globalId;
-	(*id)=globalId;
-	PIN_SetThreadData(idKey, id, threadid);
 	ReleaseLock(&lock);
 
-	string filename = KnobOutputFile.Value() +"." + decstr(*id);
+	string filename = KnobOutputFile.Value() +"." + decstr(threadId);
 	FILE* out       = fopen(filename.c_str(), "w");
-	fprintf(out, "thread begins... MYID:%u PIN_TID:%d OS_TID:0x%x\n",(*id),threadid,PIN_GetTid());
+	fprintf(out, "thread begins... PIN_TID:%d OS_TID:0x%x\n",threadId,PIN_GetTid());
 	fflush(out);
-	PIN_SetThreadData(tlsKey, out, threadid);
-	PIN_SetThreadData(mutexPtrKey, 0, threadid);
+	PIN_SetThreadData(tlsKey, out, threadId);
+	PIN_SetThreadData(mutexPtrKey, 0, threadId);
+
+	vector<UINT32>* vectorClock = new vector<UINT32>;
+	vectorClock->resize(MAX_VC_SIZE, 0);
+	assert(threadId < MAX_VC_SIZE);
+	(*vectorClock)[threadId] = 1;
+	PIN_SetThreadData(vectorClockKey, vectorClock, threadId);
 }
 
 // This routine is executed every time a thread is destroyed.
-VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
+VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadid));
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
 	fclose(out);
-	delete id;
-	PIN_SetThreadData(tlsKey, 0, threadid);
-	PIN_SetThreadData(idKey, 0, threadid);
-	PIN_SetThreadData(mutexPtrKey, 0, threadid);
+	PIN_SetThreadData(tlsKey, 0, threadId);
+	PIN_SetThreadData(mutexPtrKey, 0, threadId);
 }
 
 // This routine is executed each time lock is called.
-VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadid)
+VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadId)
 {
-	std::list<UINT32>* mutexWaitList = NULL;
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
-
+	WaitQueue* mutexWaitList = NULL;
 	// point to the current mutex
-	PIN_SetThreadData(mutexPtrKey, mutex, threadid);
+	PIN_SetThreadData(mutexPtrKey, mutex, threadId);
 
-	GetLock(&lock, threadid+1);
+	GetLock(&lock, threadId+1);
 
-	WaitQueueIterator foundQueueItr = waitQueue->find(CONVERT(long, mutex));
-	if(foundQueueItr != waitQueue->end())
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	if(foundQueueItr != waitQueueMap->end())
 	{
 		mutexWaitList = foundQueueItr->second;
 	}
 
 	if (mutexWaitList) 
 	{
-		mutexWaitList->push_back(*id);
+		mutexWaitList->push_back(threadId);
 	}
 	else
 	{
 		mutexWaitList = new std::list<UINT32>;
-		mutexWaitList->push_back(*id);
-		(*waitQueue)[CONVERT(long, mutex)] = mutexWaitList;
+		mutexWaitList->push_back(threadId);
+		(*waitQueueMap)[CONVERT(long, mutex)] = mutexWaitList;
 	}
 
 	ReleaseLock(&lock);
 }
 
-VOID AfterLock (THREADID threadid)
+VOID AfterLock (THREADID threadId)
 {
-	std::list<UINT32>* mutexWaitList = NULL;
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
-	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadid));
+	WaitQueue* mutexWaitList = NULL;
+	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadId));
+	//vector<UINT32>* vectorClock = static_cast<vector<UINT32>*>(PIN_GetThreadData(vectorClockKey, threadId));
+
 	//timespec ts;
 	//clock_gettime(CLOCK_REALTIME, &ts);
 	//fprintf(out, "thread(%u)::pthread_mutex_lock-af(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
 
 	// get the signalling thread
-	GetLock(&lock, threadid+1);
-	SignalledThreadIterator itr = signalledThread->find(CONVERT(long, mutex));
-	if(itr != signalledThread->end())
+	GetLock(&lock, threadId+1);
+	SignalThreadIterator itr = signalledThreadMap->find(CONVERT(long, mutex));
+	if(itr != signalledThreadMap->end())
 	{
-		UINT32 sigThread = itr->second;
-		if (sigThread != NO_ID) 
+		SignalThreadInfo signalThreadInfo = itr->second;
+		if (signalThreadInfo.threadId != NO_ID) 
 		{
-			printf("Thread %d happens before %d due to lock %p\n", sigThread, *id, mutex);
+			printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
 		}
 		// remove the notify signal
-		(*signalledThread)[CONVERT(long, mutex)] = NO_ID;
+		(*signalledThreadMap)[CONVERT(long, mutex)] = SignalThreadInfo();
 	}
 
-	WaitQueueIterator foundQueueItr = waitQueue->find(CONVERT(long, mutex));
-	if(foundQueueItr != waitQueue->end() && mutexWaitList)
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
 	{
 		mutexWaitList = foundQueueItr->second;
-		mutexWaitList->remove(*id);
+		mutexWaitList->remove(threadId);
 	}
 	ReleaseLock(&lock);
 }
 
-VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadid)
+VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 {
-	std::list<UINT32>* mutexWaitList = NULL;
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
+	WaitQueue* mutexWaitList = NULL;
 
-	GetLock(&lock, threadid+1);
-	WaitQueueIterator foundQueueItr = waitQueue->find(CONVERT(long, mutex));
-	if(foundQueueItr != waitQueue->end())
+	GetLock(&lock, threadId+1);
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	if(foundQueueItr != waitQueueMap->end())
 	{
 		mutexWaitList = foundQueueItr->second;
 	}
 
 	if (mutexWaitList && mutexWaitList->size()) 
 	{
-		(*signalledThread)[CONVERT(long, mutex)] = *id;
+		(*signalledThreadMap)[CONVERT(long, mutex)] = SignalThreadInfo(threadId, NULL);
 	}
 	else 
 	{
 		// lost notify
-		(*signalledThread)[CONVERT(long, mutex)] = NO_ID;
+		(*signalledThreadMap)[CONVERT(long, mutex)] = SignalThreadInfo();
 	}
 	ReleaseLock(&lock);
 
@@ -185,16 +198,16 @@ int main (INT32 argc, CHAR **argv)
 {
 	InitLock(&lock);
 
-	waitQueue = new std::map< long, std::list<UINT32>* >;
-	signalledThread = new std::map<long, UINT32>;
+	waitQueueMap = new WaitQueueMap;
+	signalledThreadMap = new SignalThreadMap;
 
 	// Initialize pin
 	if (PIN_Init(argc, argv)) return Usage();
 	PIN_InitSymbols();
 
-	tlsKey = PIN_CreateThreadDataKey(0);
-	idKey  = PIN_CreateThreadDataKey(0);
-	mutexPtrKey = PIN_CreateThreadDataKey(0);
+	tlsKey         = PIN_CreateThreadDataKey(0);
+	mutexPtrKey    = PIN_CreateThreadDataKey(0);
+	vectorClockKey = PIN_CreateThreadDataKey(0);
 
 	// Register ImageLoad to be called when each image is loaded.
 	IMG_AddInstrumentFunction(ImageLoad, 0);
