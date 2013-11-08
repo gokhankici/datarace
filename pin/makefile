@@ -95,11 +95,11 @@ $(OBJDIR)%.o : %.cpp
 
 $(TOOLS): $(PIN_LIBNAMES)
 
-adt/hashmap.o:	adt/hashmap.c
-				gcc -c -Wall -Werror -fpic $< -o $@
+# adt/hashmap.o:	adt/hashmap.c
+# 				gcc -c -Wall -Werror -fpic $< -o $@
 
-$(TOOLS): %$(PINTOOL_SUFFIX) : %.o adt/hashmap.o
-	${PIN_LD} -Iadt/ $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
+$(TOOLS): %$(PINTOOL_SUFFIX) : %.o
+	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
 
 
 ## cleaning
