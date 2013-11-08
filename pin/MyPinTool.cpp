@@ -12,6 +12,9 @@
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define MAX_VC_SIZE 32
 
+// set 1 GB limit to mutex pointer
+#define MUTEX_POINTER_LIMIT 0x40000000
+
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
 		"o", "lock_mt.out", "specify output file name");
 
@@ -23,29 +26,29 @@ typedef WaitQueueMap::iterator WaitQueueIterator;
 
 class SignalThreadInfo 
 {
-public:
-	UINT32 threadId;
-	VectorClock vectorClock;
+	public:
+		UINT32 threadId;
+		VectorClock vectorClock;
 
-	SignalThreadInfo() : threadId(NO_ID) {}
-	
-	SignalThreadInfo (UINT32 threadId, const VectorClock& vc) :
-		threadId(threadId), vectorClock(vc) {}
+		SignalThreadInfo() : threadId(NO_ID) {}
 
-	SignalThreadInfo& operator= (const SignalThreadInfo& other)
-	{
-		SignalThreadInfo temp (other);
-		threadId = other.threadId;
-		vectorClock = other.vectorClock;
+		SignalThreadInfo (UINT32 threadId, const VectorClock& vc) :
+			threadId(threadId), vectorClock(vc) {}
 
-		return *this;
-	}
-	
-	void update(UINT32 tid, const VectorClock& vc)
-	{
-		threadId    = tid;
-		vectorClock = vc;
-	}
+		SignalThreadInfo& operator= (const SignalThreadInfo& other)
+		{
+			SignalThreadInfo temp (other);
+			threadId = other.threadId;
+			vectorClock = other.vectorClock;
+
+			return *this;
+		}
+
+		void update(UINT32 tid, const VectorClock& vc)
+		{
+			threadId    = tid;
+			vectorClock = vc;
+		}
 };
 typedef std::map< long, SignalThreadInfo > SignalThreadMap;
 typedef SignalThreadMap::iterator SignalThreadIterator;
@@ -92,6 +95,12 @@ VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
 // This routine is executed each time lock is called.
 VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadId)
 {
+	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
+	{
+		PIN_SetThreadData(mutexPtrKey, mutex, threadId);
+		return;
+	}
+
 	WaitQueue* mutexWaitList = NULL;
 	// point to the current mutex
 	PIN_SetThreadData(mutexPtrKey, mutex, threadId);
@@ -135,12 +144,12 @@ VOID AfterLock (THREADID threadId)
 {
 	WaitQueue* mutexWaitList = NULL;
 	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadId));
-	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
-	//vector<UINT32>* vectorClock = static_cast<vector<UINT32>*>(PIN_GetThreadData(vectorClockKey, threadId));
+	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
+		return;
 
-	//timespec ts;
-	//clock_gettime(CLOCK_REALTIME, &ts);
-	//fprintf(out, "thread(%u)::pthread_mutex_lock-af(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
+	printf("Thread %d acquired a lock[%p].\n", threadId, mutex);
+	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
+	(*vectorClock)[threadId]++;
 
 	// get the signalling thread
 	GetLock(&lock, threadId+1);
@@ -151,29 +160,25 @@ VOID AfterLock (THREADID threadId)
 	{
 		SignalThreadInfo signalThreadInfo = itr->second;
 		// update own clock
-		(*vectorClock)[threadId]++;
 
 		if (signalThreadInfo.threadId != NO_ID) 
 		{
 			updateVectorClock(threadId, *vectorClock, signalThreadInfo.vectorClock);
-			if(CONVERT(long, mutex) < 0x1000000)
-				printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
+			printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
 		}
 
-		if(CONVERT(long, mutex) < 0x1000000)
-		{
-			printf("Thread %d acquired a lock. New vector count :\n", threadId);
-			for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
-			{
-				printf("%d, ", *vci);
-			}
-			printf("\n");
-		}
 
 		// remove the notify signal
 		SignalThreadIterator stiItr = signalledThreadMap->find(CONVERT(long, mutex));
 		stiItr->second.threadId = NO_ID;
 	}
+
+	printf("New vector count :\n");
+	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
+	{
+		printf("%d, ", *vci);
+	}
+	printf("\n");
 
 	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
 	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
@@ -187,6 +192,9 @@ VOID AfterLock (THREADID threadId)
 
 VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 {
+	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
+		return;
+
 	WaitQueue* mutexWaitList = NULL;
 	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
 
@@ -209,15 +217,12 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 		// lost notify
 		(*signalledThreadMap)[CONVERT(long, mutex)].threadId = NO_ID;
 	}
-	if(CONVERT(long, mutex) < 0x1000000)
+	printf("Thread %d released a lock[%p]. New VC: \n", threadId, mutex);
+	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
 	{
-		printf("Thread %d released a lock. New VC: \n", threadId);
-		for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
-		{
-			printf("%d, ", *vci);
-		}
-		printf("\n");
+		printf("%d, ", *vci);
 	}
+	printf("\n");
 	ReleaseLock(&lock);
 
 }
