@@ -1,33 +1,34 @@
 #include <stdio.h>
 #include <time.h>
 #include <list>
+#include <map>
 #include "pin.H"
-#include "adt/hashmap.h"
-#include "YOOP/LinkedList.h"
 
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
 		"o", "lock_mt.out", "specify output file name");
 
+typedef std::map<long int, std::list<unsigned int> >::iterator WaitQueueIterator;
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
 
 // thread local storage
-TLS_KEY tls_key;
-TLS_KEY id_key;
+TLS_KEY tlsKey;
+TLS_KEY idKey;
+TLS_KEY mutexPtrKey;
 
-UINT32 global_id=0;
+UINT32 globalId=0;
 PIN_LOCK lock;
 
-PIN_LOCK wait_queue_lock;
-hashmap* wait_queue;
+PIN_LOCK waitQueueLock;
+std::map< long, std::list<UINT32>* >* waitQueue;
 
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
 	UINT32* id = new UINT32;
 	GetLock(&lock, threadid+1);
-	++global_id;
-	(*id)=global_id;
-	PIN_SetThreadData(id_key, id, threadid);
+	++globalId;
+	(*id)=globalId;
+	PIN_SetThreadData(idKey, id, threadid);
 	ReleaseLock(&lock);
 
 	string filename = KnobOutputFile.Value() +"." + decstr(*id);
@@ -35,67 +36,89 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	//FILE* out = stderr;
 	fprintf(out, "thread begins... MYID:%u PIN_TID:%d OS_TID:0x%x\n",(*id),threadid,PIN_GetTid());
 	fflush(out);
-	PIN_SetThreadData(tls_key, out, threadid);
+	PIN_SetThreadData(tlsKey, out, threadid);
+	PIN_SetThreadData(mutexPtrKey, 0, threadid);
 }
 
 // This routine is executed every time a thread is destroyed.
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadid));
+	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
 	fclose(out);
 	delete id;
-	PIN_SetThreadData(tls_key, 0, threadid);
-	PIN_SetThreadData(id_key, 0, threadid);
+	PIN_SetThreadData(tlsKey, 0, threadid);
+	PIN_SetThreadData(idKey, 0, threadid);
+	PIN_SetThreadData(mutexPtrKey, 0, threadid);
 }
 
 // This routine is executed each time lock is called.
 VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadid)
 {
-	LinkedList* mutexWaitList = NULL;
-	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
+	std::list<UINT32>* mutexWaitList = NULL;
+	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadid));
+	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
 	timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	fprintf(out, "thread(%u)::pthread_mutex_lock-bf(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
 
-	GetLock(&wait_queue_lock, threadid+1);
-	mutexWaitList = (LinkedList*) hashmapGet(wait_queue, *CONVERT(long*, mutex));
+	// point to the current mutex
+	PIN_SetThreadData(mutexPtrKey, mutex, threadid);
+
+	GetLock(&waitQueueLock, threadid+1);
+
+	WaitQueueIterator it = waitQueue->find(*CONVERT(long*, mutex));
+	if(it != waitQueue->end())
+		mutexWaitList = it->second;
+
 	if (mutexWaitList) 
 	{
-		UnaryNode* node;
-		fprintf(out, "Waiting on %p : ", (void*) mutex);
-		for (node = mutexWaitList->begin; node; node = node->next) 
+		fprintf(out,"In the wait list of %p : \n", mutex);
+		for (std::list<UINT32>::iterator it = mutexWaitList->begin(); it != mutexWaitList->end(); it++)
 		{
-			fprintf(out, "%d, ", *((UINT32*)node->object));
+			fprintf(out,"%d, ", *it);
 		}
-		fprintf(out, "\n");
+		fprintf(out,"\n");
 
-		mutexWaitList->add(id, defaultDeleteUnaryNode);
+		mutexWaitList->push_back(*id);
 	}
 	else
 	{
-		mutexWaitList = createLinkedList();
-		mutexWaitList->add(id, defaultDeleteUnaryNode);
-		hashmapInsert(wait_queue, mutexWaitList, *id);
+		mutexWaitList = new std::list<UINT32>;
+		mutexWaitList->push_back(*id);
+		//fprintf(out,"In before lock -- %p\n", mutexWaitList);
+		waitQueue[mutex] = mutexWaitList;
 	}
-	ReleaseLock(&wait_queue_lock);
+	ReleaseLock(&waitQueueLock);
 }
 
-// This routine is executed each time lock is called.
-VOID AfterLock (pthread_mutex_t * mutex, THREADID threadid)
+VOID AfterLock (THREADID threadid)
 {
-	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
+	std::list<UINT32>* mutexWaitList = NULL;
+	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadid));
+	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
+	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadid));
 	timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	fprintf(out, "thread(%u)::pthread_mutex_lock-af(%p)::time(%ld,%ld)\n",(*id),mutex,ts.tv_sec,ts.tv_nsec);
+
+	GetLock(&waitQueueLock, threadid+1);
+	fprintf(out,"after lock in of mutex:%p\n", mutex);
+
+	auto it = waitQueue->find(*CONVERT(long*, mutex));
+	if(it != waitQueue->end())
+		mutexWaitList = it->second;
+
+	fprintf(out,"waiting list:%p\n", mutexWaitList);
+	//mutexWaitList->remove(*id);
+	ReleaseLock(&waitQueueLock);
 }
 
 VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadid)
 {
-	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tls_key, threadid));
-	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(id_key, threadid));
+	//fprintf(out,"In before unlock\n");
+	FILE* out  = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadid));
+	UINT32* id = static_cast<UINT32*>(PIN_GetThreadData(idKey, threadid));
 	timespec ts;
 	clock_gettime(CLOCK_REALTIME, &ts);
 	if ((void*) mutex != (void*) &lock) 
@@ -119,7 +142,6 @@ VOID ImageLoad (IMG img, VOID *)
 				IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
 				IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterLock),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
 				IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
@@ -133,7 +155,6 @@ VOID ImageLoad (IMG img, VOID *)
 				IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
-	printf("Image loaded\n");
 }
 
 
@@ -151,16 +172,17 @@ INT32 Usage ()
 int main (INT32 argc, CHAR **argv)
 {
 	InitLock(&lock);
-	InitLock(&wait_queue_lock);
-	wait_queue = hashmapCreate(0);
-	printf("wait queue: %p\n", wait_queue);
+	InitLock(&waitQueueLock);
+	waitQueue = new std::map< long, std::list<UINT32>* >;
+	printf("wait queue: %p\n", waitQueue);
 
 	// Initialize pin
 	if (PIN_Init(argc, argv)) return Usage();
 	PIN_InitSymbols();
 
-	tls_key = PIN_CreateThreadDataKey(0);
-	id_key  = PIN_CreateThreadDataKey(0);
+	tlsKey = PIN_CreateThreadDataKey(0);
+	idKey  = PIN_CreateThreadDataKey(0);
+	mutexPtrKey = PIN_CreateThreadDataKey(0);
 
 	// Register ImageLoad to be called when each image is loaded.
 	IMG_AddInstrumentFunction(ImageLoad, 0);
