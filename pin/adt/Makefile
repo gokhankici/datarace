@@ -26,7 +26,7 @@ LFLAGS = #-L/home/newhall/lib  -L../lib
 LIBS = #-lmylib -lm
 
 # define the C source files
-SRCS = hashmap.c
+SRCS = hashmap.c main.c
 
 # define the C object files 
 #
@@ -39,7 +39,7 @@ SRCS = hashmap.c
 OBJS = $(SRCS:.c=.o)
 
 # define the executable file 
-MAIN = 
+MAIN = main
 
 #
 # The following part of the makefile is generic; it can be used to 
@@ -49,11 +49,11 @@ MAIN =
 
 .PHONY: depend clean
 
-# all:	$(MAIN)
-# 		@echo  Simple compiler named mycc has been compiled
+all:		$(MAIN)
+			@echo Done
 
-all: $(OBJS) 
-#		$(CC) $(CFLAGS) $(INCLUDES) -o $(MAIN) $(OBJS) $(LFLAGS) $(LIBS)
+$(MAIN):	$(OBJS) 
+			$(CC) $(CFLAGS) $(INCLUDES) -o $(MAIN) $(OBJS) $(LFLAGS) $(LIBS)
 
 
 # this is a suffix replacement rule for building .o's from .c's 

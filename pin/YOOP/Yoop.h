@@ -13,13 +13,13 @@
 #include <string.h>
 
 // "_this" represents the current object.
-void * _this = NULL;
+void * ___this = NULL;
 
 // Equivalent to "ObjectPtr->Member" in C++.
-#define OOP_CALL(ObjectPtr, Member) (_this = ObjectPtr, ObjectPtr->Member)
+#define OOP_CALL(ObjectPtr, Member) (___this = ObjectPtr, ObjectPtr->Member)
 
 // Equivalent to "Object.Member" in C++.
-#define OOP_CALL2(Object, Member) (_this = &(Object), Object.Member)
+#define OOP_CALL2(Object, Member) (___this = &(Object), Object.Member)
 
 // Equivalent to "new Object" in C++, BUT DOES NOT CALL the constructor.
 #define NEW(ClassName) (ClassName *)malloc(sizeof(ClassName))

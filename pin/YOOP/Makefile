@@ -18,7 +18,7 @@ INCLUDES = #-I/home/newhall/include  -I../include
 # define library paths in addition to /usr/lib
 #   if I wanted to include libraries not in /usr/lib I'd specify
 #   their path using -Lpath, something like:
-LFLAGS = -L./
+LFLAGS = #-L./
 
 # define any libraries to link into executable:
 #   if I want to link in libraries (libx.so or libx.a) I use the -llibname 
@@ -42,7 +42,7 @@ OBJS = $(SRCS:.c=.o)
 # define the executable file 
 MAIN = StressTest
 
-HEADERS = ArrayList.h BinaryNode.h Boolean.h CharStack.h Container.h getRealTime.h LinkedList.h Point.h StopWatch.h UnaryNode.h YoopClassTemplate.h Yoop.h
+HEADERS = LinkedList.h UnaryNode.h Yoop.h
 
 #
 # The following part of the makefile is generic; it can be used to 

@@ -1,4 +1,3 @@
-
 #include "hashmap.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,8 +7,7 @@
 
 #define ACTIVE 1
 
-typedef struct 
-{
+typedef struct {
 	void* data;
 	int flags;
 	long key;

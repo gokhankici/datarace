@@ -77,7 +77,6 @@ TOOLS = $(TOOL_ROOTS:%=$(OBJDIR)%$(PINTOOL_SUFFIX))
 
 all: tools
 	make -C libbloom/
-	make -C YOOP/
 	make -C adt/
 tools: $(OBJDIR) $(TOOLS) $(OBJDIR)cp-pin.exe
 test: $(OBJDIR) $(TOOL_ROOTS:%=%.test)
@@ -96,13 +95,15 @@ $(OBJDIR)%.o : %.cpp
 
 $(TOOLS): $(PIN_LIBNAMES)
 
-$(TOOLS): %$(PINTOOL_SUFFIX) : %.o
-	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $< ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
+adt/hashmap.o:	adt/hashmap.c
+				gcc -c -Wall -Werror -fpic $< -o $@
+
+$(TOOLS): %$(PINTOOL_SUFFIX) : %.o adt/hashmap.o
+	${PIN_LD} -Iadt/ $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
 
 
 ## cleaning
 clean:
 	-rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
 	make -C libbloom clean
-	make -C YOOP clean
 	make -C adt clean

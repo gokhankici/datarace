@@ -4,20 +4,21 @@
 #define UNARYNODE_H
 
 // Required by YOOP1
-#define THIS ((UnaryNode *)_this)    
+#define THIS ((UnaryNode *)___this)    
 
 // ******************
 // *   CLASS BODY   *
 // ******************
 
-typedef struct UnaryNodeBody {
+typedef struct UnaryNodeBody 
+{
     // Members
     struct UnaryNodeBody * prev;
     void * object;
     struct UnaryNodeBody * next;
     
     // Methods
-    void (*delete)();
+    void (*myDelete)();
 } UnaryNode;
 
 // ******************
@@ -26,25 +27,27 @@ typedef struct UnaryNodeBody {
 
 // Initializes and returns a new UnaryNode object
 UnaryNode * createUnaryNode(UnaryNode * prev, void * object, UnaryNode * next, 
-                            void (*delFunc)()) {
-    UnaryNode * this = NEW(UnaryNode);
+                            void (*delFunc)()) 
+{
+    UnaryNode * __this = NEW(UnaryNode);
 
-    this->prev = prev;
+    __this->prev = prev;
     if(prev != NULL)
-        prev->next = this;
+        prev->next = __this;
 
-    this->object = object;
-    this->next = next;
+    __this->object = object;
+    __this->next = next;
     if(next != NULL)
-        next->prev = this;
+        next->prev = __this;
 
-    this->delete = delFunc;
+    __this->myDelete = delFunc;
     
-    return this;
+    return __this;
 }
 
 // Removes this node and frees the memory
-void defaultDeleteUnaryNode() {
+void defaultDeleteUnaryNode() 
+{
     free(THIS);
 }
 
