@@ -80,11 +80,13 @@ all:	packages tools
 
 packages:	
 	make -C MultiCacheSim-dist/
-	make -C libbloom/
 	make -C adt/
 
 tools: $(OBJDIR) $(TOOLS) $(OBJDIR)cp-pin.exe
-test: $(OBJDIR) $(TOOL_ROOTS:%=%.test)
+test: $(OBJDIR) $(TOOL_ROOTS:%=%.test) mytest
+
+mytest:		test.cpp Bloom.cpp
+			g++ -o $@ $^
 
 MyPinTool.test: $(OBJDIR)cp-pin.exe
 	$(MAKE) -k PIN_HOME=$(PIN_HOME)
@@ -109,13 +111,15 @@ MCS_OBJS = MultiCacheSim-dist/CacheCore.o \
 		   MultiCacheSim-dist/SMPCache.o \
 		   MultiCacheSim-dist/Snippets.o
 
-$(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(OBJDIR)MultiCacheSim_PinDriver.o 
+MY_OBJS = $(OBJDIR)MultiCacheSim_PinDriver.o\
+		  $(OBJDIR)Bloom.o
+
+$(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(MY_OBJS)
 	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) $(MCS_OBJS) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
 
 
 ## cleaning
 clean:
 	-rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
-	make -C libbloom clean
 	make -C adt clean
 	make -C MultiCacheSim-dist clean

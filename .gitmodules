@@ -1,3 +1,0 @@
-[submodule "pin/libbloom"]
-	path = pin/libbloom
-	url = https://github.com/jvirkki/libbloom.git

@@ -1,14 +1,14 @@
 #include "pin.H"
 
+#include <iostream>
+#include <iterator>
 #include <stdio.h>
 #include <time.h>
 #include <list>
 #include <map>
 #include <assert.h>
 #include "MultiCacheSim_PinDriver.h"
-
-#include <iostream>
-#include <iterator>
+#include "Bloom.h"
 
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
 #define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
@@ -20,35 +20,25 @@
 
 /* === KNOB DEFINITIONS =================================== */
 
-KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
-		"o", "lock_mt.out", "specify output file name");
+KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "lock_mt.out", "specify output file name");
 
-KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool",
-			   "stopOnProtoBug", "false", "Stop the Simulation when a deviation is detected between the test protocol and the reference");//default cache is verbose 
+KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool", "stopOnProtoBug", "false", "Stop the Simulation when a deviation is detected between the test protocol and the reference");//default cache is verbose 
 
-KNOB<bool> KnobPrintOnError(KNOB_MODE_WRITEONCE, "pintool",
-			   "printOnProtoBug", "false", "Print a debugging message when a deviation is detected between the test protocol and the reference");//default cache is verbose 
+KNOB<bool> KnobPrintOnError(KNOB_MODE_WRITEONCE, "pintool", "printOnProtoBug", "false", "Print a debugging message when a deviation is detected between the test protocol and the reference");//default cache is verbose 
 
-KNOB<bool> KnobConcise(KNOB_MODE_WRITEONCE, "pintool",
-			   "concise", "true", "Print output concisely");//default cache is verbose 
+KNOB<bool> KnobConcise(KNOB_MODE_WRITEONCE, "pintool", "concise", "true", "Print output concisely");//default cache is verbose 
 
-KNOB<unsigned int> KnobCacheSize(KNOB_MODE_WRITEONCE, "pintool",
-			   "csize", "65536", "Cache Size");//default cache is 64KB
+KNOB<unsigned int> KnobCacheSize(KNOB_MODE_WRITEONCE, "pintool", "csize", "65536", "Cache Size");//default cache is 64KB
 
-KNOB<unsigned int> KnobBlockSize(KNOB_MODE_WRITEONCE, "pintool",
-			   "bsize", "64", "Block Size");//default block is 64B
+KNOB<unsigned int> KnobBlockSize(KNOB_MODE_WRITEONCE, "pintool", "bsize", "64", "Block Size");//default block is 64B
 
-KNOB<unsigned int> KnobAssoc(KNOB_MODE_WRITEONCE, "pintool",
-			   "assoc", "2", "Associativity");//default associativity is 2-way
+KNOB<unsigned int> KnobAssoc(KNOB_MODE_WRITEONCE, "pintool", "assoc", "2", "Associativity");//default associativity is 2-way
 
-KNOB<unsigned int> KnobNumCaches(KNOB_MODE_WRITEONCE, "pintool",
-			   "numcaches", "1", "Number of Caches to Simulate");
+KNOB<unsigned int> KnobNumCaches(KNOB_MODE_WRITEONCE, "pintool", "numcaches", "1", "Number of Caches to Simulate");
 
-KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool",
-			   "protos", "./MultiCacheSim-dist/MSI_SMPCache.so", "Cache Coherence Protocol Modules To Simulate");
+KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos", "./MultiCacheSim-dist/MSI_SMPCache.so", "Cache Coherence Protocol Modules To Simulate");
 
-KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool",
-			   "reference", "/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/pin/MultiCacheSim-dist/MSI_SMPCache.so", "Reference Protocol that is compared to test Protocols for Correctness");
+KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference", "/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/pin/MultiCacheSim-dist/MSI_SMPCache.so", "Reference Protocol that is compared to test Protocols for Correctness");
 
 typedef vector<UINT32> VectorClock;
 
@@ -85,16 +75,22 @@ class SignalThreadInfo
 typedef std::map< long, SignalThreadInfo > SignalThreadMap;
 typedef SignalThreadMap::iterator SignalThreadIterator;
 
-// thread local storage
+// <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 TLS_KEY tlsKey;
 TLS_KEY mutexPtrKey;
-TLS_KEY vectorClockKey;
 
+TLS_KEY vectorClockKey;
+TLS_KEY writeSignature;
+TLS_KEY readSignature;
+// >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
+
+// <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
 UINT32 globalId=0;
 PIN_LOCK lock;
 
 WaitQueueMap* waitQueueMap;
 SignalThreadMap* signalledThreadMap;
+// >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -102,6 +98,11 @@ VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
 	GetLock(&lock, threadId+1);
 	++globalId;
 	ReleaseLock(&lock);
+
+	Bloom* readBloomFilter = new Bloom();
+	PIN_SetThreadData(readSignature, readBloomFilter, threadId);
+	Bloom* writeBloomFilter = new Bloom();
+	PIN_SetThreadData(writeSignature, writeBloomFilter, threadId);
 
 	string filename = KnobOutputFile.Value() +"." + decstr(threadId);
 	FILE* out       = fopen(filename.c_str(), "w");
@@ -227,19 +228,21 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
 		return;
 
-	WaitQueue* mutexWaitList = NULL;
+	//WaitQueue* mutexWaitList = NULL;
 	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
 
 	GetLock(&lock, threadId+1);
-	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
-	if(foundQueueItr != waitQueueMap->end())
-	{
-		mutexWaitList = foundQueueItr->second;
-	}
+	//WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	//if(foundQueueItr != waitQueueMap->end())
+	//{
+		//mutexWaitList = foundQueueItr->second;
+	//}
 
 	// In new epoch
 	(*vectorClock)[threadId]++;
 
+	(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
+	/*
 	if (mutexWaitList && mutexWaitList->size()) 
 	{
 		(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
@@ -249,6 +252,7 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 		// lost notify
 		(*signalledThreadMap)[CONVERT(long, mutex)].threadId = NO_ID;
 	}
+	*/
 	printf("Thread %d released a lock[%p]. New VC: \n", threadId, mutex);
 	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
 	{
@@ -418,14 +422,14 @@ int main (INT32 argc, CHAR **argv)
 
 	// Register ImageLoad to be called when each image is loaded.
 	IMG_AddInstrumentFunction(ImageLoad, 0);
-	//TRACE_AddInstrumentFunction(instrumentTrace, 0);
+	TRACE_AddInstrumentFunction(instrumentTrace, 0);
 
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
 
-	//PIN_InterceptSignal(SIGTERM,termHandler,0);
-	//PIN_InterceptSignal(SIGSEGV,segvHandler,0);
+	PIN_InterceptSignal(SIGTERM,termHandler,0);
+	PIN_InterceptSignal(SIGSEGV,segvHandler,0);
 
 	PIN_AddFiniFunction(Fini, 0);
 

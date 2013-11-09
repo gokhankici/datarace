@@ -14,6 +14,10 @@ std::vector<MultiCacheSim *> Caches;
 MultiCacheSim *ReferenceProtocol;
 PIN_LOCK mccLock;
 
+extern TLS_KEY tlsKey;
+extern TLS_KEY writeSignature;
+extern TLS_KEY readSignature;
+
 bool stopOnError = false;
 bool printOnError = false;
 
@@ -31,6 +35,9 @@ VOID TurnInstrumentationOff(ADDRINT tid)
 
 void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
 {
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
+	fprintf(out, "%d - R - %lX\n", tid, addr);
+
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->readLine(tid,inst,addr);
 	std::vector<MultiCacheSim *>::iterator i,e;
