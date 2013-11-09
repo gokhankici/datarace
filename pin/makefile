@@ -68,6 +68,7 @@ TOOL_ROOTS = MyPinTool
 
 TOOLS = $(TOOL_ROOTS:%=$(OBJDIR)%$(PINTOOL_SUFFIX))
 
+INC_DIRS = -I.
 
 ##############################################################
 #
@@ -75,9 +76,13 @@ TOOLS = $(TOOL_ROOTS:%=$(OBJDIR)%$(PINTOOL_SUFFIX))
 #
 ##############################################################
 
-all: tools
+all:	packages tools
+
+packages:	
+	make -C MultiCacheSim-dist/
 	make -C libbloom/
 	make -C adt/
+
 tools: $(OBJDIR) $(TOOLS) $(OBJDIR)cp-pin.exe
 test: $(OBJDIR) $(TOOL_ROOTS:%=%.test)
 
@@ -91,15 +96,21 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)%.o : %.cpp
-	$(CXX) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
+	$(CXX) $(INC_DIRS) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
 
 $(TOOLS): $(PIN_LIBNAMES)
 
 # adt/hashmap.o:	adt/hashmap.c
 # 				gcc -c -Wall -Werror -fpic $< -o $@
 
-$(TOOLS): %$(PINTOOL_SUFFIX) : %.o
-	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
+MCS_OBJS = MultiCacheSim-dist/CacheCore.o \
+		   MultiCacheSim-dist/nanassert.o \
+		   MultiCacheSim-dist/MultiCacheSim.o \
+		   MultiCacheSim-dist/SMPCache.o \
+		   MultiCacheSim-dist/Snippets.o
+
+$(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(OBJDIR)MultiCacheSim_PinDriver.o 
+	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) $(MCS_OBJS) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt
 
 
 ## cleaning
@@ -107,3 +118,4 @@ clean:
 	-rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
 	make -C libbloom clean
 	make -C adt clean
+	make -C MultiCacheSim-dist clean

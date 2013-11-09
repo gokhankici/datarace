@@ -1,22 +1,54 @@
+#include "pin.H"
+
 #include <stdio.h>
 #include <time.h>
 #include <list>
 #include <map>
 #include <assert.h>
-#include "pin.H"
+#include "MultiCacheSim_PinDriver.h"
 
 #include <iostream>
 #include <iterator>
 
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
+#define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define MAX_VC_SIZE 32
 
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
 
+/* === KNOB DEFINITIONS =================================== */
+
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool",
 		"o", "lock_mt.out", "specify output file name");
+
+KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool",
+			   "stopOnProtoBug", "false", "Stop the Simulation when a deviation is detected between the test protocol and the reference");//default cache is verbose 
+
+KNOB<bool> KnobPrintOnError(KNOB_MODE_WRITEONCE, "pintool",
+			   "printOnProtoBug", "false", "Print a debugging message when a deviation is detected between the test protocol and the reference");//default cache is verbose 
+
+KNOB<bool> KnobConcise(KNOB_MODE_WRITEONCE, "pintool",
+			   "concise", "true", "Print output concisely");//default cache is verbose 
+
+KNOB<unsigned int> KnobCacheSize(KNOB_MODE_WRITEONCE, "pintool",
+			   "csize", "65536", "Cache Size");//default cache is 64KB
+
+KNOB<unsigned int> KnobBlockSize(KNOB_MODE_WRITEONCE, "pintool",
+			   "bsize", "64", "Block Size");//default block is 64B
+
+KNOB<unsigned int> KnobAssoc(KNOB_MODE_WRITEONCE, "pintool",
+			   "assoc", "2", "Associativity");//default associativity is 2-way
+
+KNOB<unsigned int> KnobNumCaches(KNOB_MODE_WRITEONCE, "pintool",
+			   "numcaches", "1", "Number of Caches to Simulate");
+
+KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool",
+			   "protos", "./MultiCacheSim-dist/MSI_SMPCache.so", "Cache Coherence Protocol Modules To Simulate");
+
+KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool",
+			   "reference", "/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/pin/MultiCacheSim-dist/MSI_SMPCache.so", "Reference Protocol that is compared to test Protocols for Correctness");
 
 typedef vector<UINT32> VectorClock;
 
@@ -251,14 +283,43 @@ VOID ImageLoad (IMG img, VOID *)
 				IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
+
+	rtn = RTN_FindByName(img, "INSTRUMENT_OFF");
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+		RTN_InsertCall(rtn, 
+				IPOINT_BEFORE, 
+				(AFUNPTR)TurnInstrumentationOff, 
+				IARG_THREAD_ID,
+				IARG_END);
+		RTN_Close(rtn);
+	}
+
+
+	rtn = RTN_FindByName(img, "INSTRUMENT_ON");
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+		RTN_InsertCall(rtn, 
+				IPOINT_BEFORE, 
+				(AFUNPTR)TurnInstrumentationOn, 
+				IARG_THREAD_ID,
+				IARG_END);
+		RTN_Close(rtn);
+	}
 }
 
-
-INT32 Usage ()
+INT32 usage ()
 {
-	PIN_ERROR("This Pintool prints a trace of pthread_mutex_lock and pthread_mutex_unlock  calls in the guest application\n"
-			+ KNOB_BASE::StringKnobSummary() + "\n");
-	return -1;
+    cerr << "An attempt to create SigRace";
+    cerr << KNOB_BASE::StringKnobSummary();
+    cerr << endl;
+    return -1;
+}
+
+VOID Fini(INT32 code, VOID *v)
+{
 }
 
 /* ===================================================================== */
@@ -267,25 +328,106 @@ INT32 Usage ()
 
 int main (INT32 argc, CHAR **argv)
 {
+	PIN_InitSymbols();
+	if( PIN_Init(argc,argv) ) 
+	{
+		return usage();
+	}
+
+	InitLock(&mccLock);
 	InitLock(&lock);
 
 	waitQueueMap = new WaitQueueMap;
 	signalledThreadMap = new SignalThreadMap;
 
-	// Initialize pin
-	if (PIN_Init(argc, argv)) return Usage();
-	PIN_InitSymbols();
-
 	tlsKey         = PIN_CreateThreadDataKey(0);
 	mutexPtrKey    = PIN_CreateThreadDataKey(0);
 	vectorClockKey = PIN_CreateThreadDataKey(0);
 
+	for(int i = 0; i < MAX_NTHREADS; i++)
+	{
+		instrumentationStatus[i] = true;
+	}
+
+	unsigned long csize = KnobCacheSize.Value();
+	unsigned long bsize = KnobBlockSize.Value();
+	unsigned long assoc = KnobAssoc.Value();
+	unsigned long num = KnobNumCaches.Value();
+
+	const char *pstr = KnobProtocol.Value().c_str();
+	char *ct = strtok((char *)pstr,",");
+	while(ct != NULL)
+	{
+		void *chand = dlopen( ct, RTLD_LAZY | RTLD_LOCAL );
+		if( chand == NULL )
+		{
+			fprintf(stderr,"Couldn't Load %s\n", argv[1]);
+			fprintf(stderr,"dlerror: %s\n", dlerror());
+			exit(1);
+		}
+
+		CacheFactory cfac = (CacheFactory)dlsym(chand, "Create");
+
+		if( chand == NULL )
+		{
+			fprintf(stderr,"Couldn't get the Create function\n");
+			fprintf(stderr,"dlerror: %s\n", dlerror());
+			exit(1);
+		}
+
+		MultiCacheSim *c = new MultiCacheSim(stdout, csize, assoc, bsize, cfac);
+		for(unsigned int i = 0; i < num; i++)
+		{
+			c->createNewCache();
+		} 
+		fprintf(stderr,"Loaded Protocol Plugin %s\n",ct);
+		Caches.push_back(c);
+
+		ct = strtok(NULL,","); 
+
+	}
+
+	void *chand = dlopen( KnobReference.Value().c_str(), RTLD_LAZY | RTLD_LOCAL );
+	if( chand == NULL )
+	{
+		fprintf(stderr,"Couldn't Load Reference: %s\n", argv[1]);
+		fprintf(stderr,"dlerror: %s\n", dlerror());
+		exit(1);
+	}
+
+	CacheFactory cfac = (CacheFactory)dlsym(chand, "Create");
+
+	if( chand == NULL )
+	{
+		fprintf(stderr,"Couldn't get the Create function\n");
+		fprintf(stderr,"dlerror: %s\n", dlerror());
+		exit(1);
+	}
+
+	ReferenceProtocol = 
+		new MultiCacheSim(stdout, csize, assoc, bsize, cfac);
+
+	for(unsigned int i = 0; i < num; i++)
+	{
+		ReferenceProtocol->createNewCache();
+	} 
+	fprintf(stderr,"Using Reference Implementation %s\n",KnobReference.Value().c_str());
+
+	stopOnError = KnobStopOnError.Value();
+	printOnError = KnobPrintOnError.Value();
+
 	// Register ImageLoad to be called when each image is loaded.
 	IMG_AddInstrumentFunction(ImageLoad, 0);
+	//TRACE_AddInstrumentFunction(instrumentTrace, 0);
 
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
+
+	//PIN_InterceptSignal(SIGTERM,termHandler,0);
+	//PIN_InterceptSignal(SIGSEGV,segvHandler,0);
+
+	PIN_AddFiniFunction(Fini, 0);
 
 	// Never returns
 	PIN_StartProgram();
