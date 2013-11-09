@@ -43,6 +43,9 @@ KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference", "/home/g
 
 typedef vector<UINT32> VectorClock;
 
+/*
+ * IMPLEMENTATION OF WAITING QUEUE
+ */
 typedef std::list<UINT32> WaitQueue;
 typedef std::map< long, WaitQueue* > WaitQueueMap;
 typedef WaitQueueMap::iterator WaitQueueIterator;
@@ -76,19 +79,41 @@ class SignalThreadInfo
 typedef std::map< long, SignalThreadInfo > SignalThreadMap;
 typedef SignalThreadMap::iterator SignalThreadIterator;
 
+/*
+ * IMPLEMENTATION OF THREAD SYNCHRONIZATION SIGNATURE
+ */
 class SigRaceData
 {
 	public:
-		SigRaceData(VectorClock& ts, Bloom& r, Bloom& w)
-			: ts(ts), r(r), w(w) {}
+		SigRaceData(int threadId, VectorClock& ts, Bloom& r, Bloom& w)
+			: threadId(threadId), ts(ts), r(r), w(w) {}
 
+		bool operator<(const SigRaceData& rhs )
+		{
+			if (threadId == rhs.threadId) 
+			{
+				return ts[threadId] < rhs.ts[rhs.threadId];
+			}
+
+			UINT32 l_l = ts[threadId];
+			UINT32 l_r = ts[rhs.threadId];
+			UINT32 r_r = rhs.ts[rhs.threadId];
+			UINT32 r_l = rhs.ts[threadId];
+
+			// both threads' values are lower in the lhs thread
+			return l_l < r_l && l_r < r_r;
+		}
+
+		int threadId;
 		VectorClock ts;
 		Bloom r;
 		Bloom w;
 };
 
+/*
+ * IMPLEMENTATION OF RACE DETECTION MODULE
+ */
 typedef std::list<SigRaceData*> BlockHistoryQueue;
-
 class RaceDetectionModule
 {
 	public:
@@ -108,9 +133,9 @@ class RaceDetectionModule
 			}
 		}
 
-		void addSignature(int threadId, SigRaceData* sigRaceData)
+		void addSignature(SigRaceData* sigRaceData)
 		{
-			BlockHistoryQueue* queue = blockHistoryQueues[threadId];
+			BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->threadId];
 			queue->push_front(sigRaceData);
 
 			if (queue->size() > BLOCK_HISTORY_QUEUE_SIZE) 
@@ -122,11 +147,11 @@ class RaceDetectionModule
 		void addProcessor()
 		{
 			threadCount++;
-			blockHistoryQueues.push_back(new std::list<SigRaceData*>);
+			blockHistoryQueues.push_back(new BlockHistoryQueue);
 		}
 
 	private:
-		std::vector< std::list<SigRaceData*> * > blockHistoryQueues;
+		std::vector< BlockHistoryQueue* > blockHistoryQueues;
 		int threadCount;
 };
 

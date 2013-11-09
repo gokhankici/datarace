@@ -1,6 +1,7 @@
 #include <limits.h>
 #include <cstdarg>
 #include <string.h>
+#include <assert.h>
 
 #include "Bloom.h"
 #include "MurmurHash2.h"
@@ -76,6 +77,22 @@ const Bloom& Bloom::operator=(const Bloom& bloom)
 Bloom::Bloom(const Bloom& bloom)
 {
 	(*this) = bloom;
+}
+
+bool Bloom::hasInCommon(const Bloom& bloom)
+{
+	assert(filterSize == bloom.filterSize);
+	int byteCount = getFilterSizeInBytes();
+
+	for(int n = 0; n < byteCount; ++n) 
+	{
+		if(filter[n] & bloom.filter[n])
+		{
+			return true;
+		}
+	}
+
+	return false;
 }
 
 bool Bloom::check(const unsigned char *s)

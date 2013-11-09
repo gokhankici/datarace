@@ -19,6 +19,7 @@ class Bloom
 
 		void add(const unsigned char *s);
 		bool check(const unsigned char *s);
+		bool hasInCommon(const Bloom& bloom);
 		void clear();
 
 		const unsigned char* getFilter() { return filter; }
