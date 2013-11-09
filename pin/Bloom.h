@@ -4,8 +4,9 @@
 #include <stdlib.h>
 
 #define ADDR_SIZE 8
+#define BLOOM_ADDR(address) ((const unsigned char*) &address)
 
-typedef unsigned int (*hashfunc_t)(const char *);
+typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
 class Bloom 
 {
@@ -13,12 +14,13 @@ class Bloom
 		Bloom(int size, int nfuncs, ...);
 		Bloom();
 		~Bloom();
-		void add(const char *s);
-		bool check(const char *s);
+		void add(const unsigned char *s);
+		bool check(const unsigned char *s);
 		void clear();
 
 		const unsigned char* getFilter() { return filter; }
 		int getFilterSize(){ return filterSize; }
+		int getFilterSizeInBytes(){ return (filterSize+7)/8; }
 
 	private:
 		int filterSize;

@@ -80,8 +80,8 @@ TLS_KEY tlsKey;
 TLS_KEY mutexPtrKey;
 
 TLS_KEY vectorClockKey;
-TLS_KEY writeSignature;
-TLS_KEY readSignature;
+TLS_KEY tlsWriteSignatureKey;
+TLS_KEY tlsReadSignatureKey;
 // >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
 
 // <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -92,6 +92,37 @@ WaitQueueMap* waitQueueMap;
 SignalThreadMap* signalledThreadMap;
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
+static void writeInHex(const unsigned char* data, int len)
+{
+	for (int i = 0; i < len; i++) 
+	{
+		printf("%02X", data[i]);
+	}
+}
+
+static void printSignatures()
+{
+	int tid = PIN_ThreadId();
+	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, tid));
+	Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
+	Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
+
+	printf("Thread %d:\n", tid);
+
+	printf("\tVC: ");
+	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
+	{
+		printf("%d, ", *vci);
+	}
+
+	printf("\n\tR: ");
+	writeInHex(readSig->getFilter(), readSig->getFilterSizeInBytes());
+
+	printf("\n\tW: ");
+	writeInHex(writeSig->getFilter(), writeSig->getFilterSizeInBytes());
+	printf("\n");
+}
+
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
@@ -100,9 +131,9 @@ VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
 	ReleaseLock(&lock);
 
 	Bloom* readBloomFilter = new Bloom();
-	PIN_SetThreadData(readSignature, readBloomFilter, threadId);
+	PIN_SetThreadData(tlsReadSignatureKey, readBloomFilter, threadId);
 	Bloom* writeBloomFilter = new Bloom();
-	PIN_SetThreadData(writeSignature, writeBloomFilter, threadId);
+	PIN_SetThreadData(tlsWriteSignatureKey, writeBloomFilter, threadId);
 
 	string filename = KnobOutputFile.Value() +"." + decstr(threadId);
 	FILE* out       = fopen(filename.c_str(), "w");
@@ -200,18 +231,16 @@ VOID AfterLock (THREADID threadId)
 			printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
 		}
 
-
 		// remove the notify signal
 		SignalThreadIterator stiItr = signalledThreadMap->find(CONVERT(long, mutex));
 		stiItr->second.threadId = NO_ID;
 	}
 
-	printf("New vector count :\n");
-	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
-	{
-		printf("%d, ", *vci);
-	}
-	printf("\n");
+	printSignatures();
+	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
+	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
+	readFilter->clear();
+	writeFilter->clear();
 
 	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
 	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
@@ -253,12 +282,9 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 		(*signalledThreadMap)[CONVERT(long, mutex)].threadId = NO_ID;
 	}
 	*/
-	printf("Thread %d released a lock[%p]. New VC: \n", threadId, mutex);
-	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
-	{
-		printf("%d, ", *vci);
-	}
-	printf("\n");
+
+	printSignatures();
+
 	ReleaseLock(&lock);
 
 }
@@ -347,6 +373,8 @@ int main (INT32 argc, CHAR **argv)
 	tlsKey         = PIN_CreateThreadDataKey(0);
 	mutexPtrKey    = PIN_CreateThreadDataKey(0);
 	vectorClockKey = PIN_CreateThreadDataKey(0);
+	tlsReadSignatureKey = PIN_CreateThreadDataKey(0);
+	tlsWriteSignatureKey = PIN_CreateThreadDataKey(0);
 
 	for(int i = 0; i < MAX_NTHREADS; i++)
 	{
@@ -427,9 +455,6 @@ int main (INT32 argc, CHAR **argv)
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
-
-	PIN_InterceptSignal(SIGTERM,termHandler,0);
-	PIN_InterceptSignal(SIGSEGV,segvHandler,0);
 
 	PIN_AddFiniFunction(Fini, 0);
 

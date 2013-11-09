@@ -8,14 +8,14 @@
 #define SETBIT(filter, n) (filter[n/CHAR_BIT] |= (1<<(n%CHAR_BIT)))
 #define GETBIT(filter, n) (filter[n/CHAR_BIT] & (1<<(n%CHAR_BIT)))
 
-static unsigned int defaultHashFunction(const char * key)
+static unsigned int defaultHashFunction(const unsigned char * key)
 {
 	return MurmurHash2(key, ADDR_SIZE, 0);
 }
 
 Bloom::Bloom()
 {
-	int size = 256;
+	int size   = 2048;
 	int nfuncs = 1;
 	
 	filter = (unsigned char *) calloc((size+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
@@ -51,7 +51,7 @@ Bloom::~Bloom()
 	free(funcs);
 }
 
-void Bloom::add(const char *s)
+void Bloom::add(const unsigned char *s)
 {
 	for(int n=0; n < nfuncs; ++n) 
 	{
@@ -59,7 +59,7 @@ void Bloom::add(const char *s)
 	}
 }
 
-bool Bloom::check(const char *s)
+bool Bloom::check(const unsigned char *s)
 {
 	for(int n=0; n < nfuncs; ++n) 
 	{

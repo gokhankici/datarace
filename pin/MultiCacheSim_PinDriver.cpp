@@ -9,14 +9,15 @@
 #include <dlfcn.h>
 
 #include "MultiCacheSim_PinDriver.h"
+#include "Bloom.h"
 
 std::vector<MultiCacheSim *> Caches;
 MultiCacheSim *ReferenceProtocol;
 PIN_LOCK mccLock;
 
 extern TLS_KEY tlsKey;
-extern TLS_KEY writeSignature;
-extern TLS_KEY readSignature;
+extern TLS_KEY tlsWriteSignatureKey;
+extern TLS_KEY tlsReadSignatureKey;
 
 bool stopOnError = false;
 bool printOnError = false;
@@ -35,8 +36,11 @@ VOID TurnInstrumentationOff(ADDRINT tid)
 
 void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
 {
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
-	fprintf(out, "%d - R - %lX\n", tid, addr);
+	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
+	fprintf(out , "R : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+
+	Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
+	readSig->add(BLOOM_ADDR(addr));
 
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->readLine(tid,inst,addr);
@@ -66,6 +70,12 @@ void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
 
 void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
 {
+	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
+	fprintf(out , "W : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+
+	Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
+	writeSig->add(BLOOM_ADDR(addr));
+
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->writeLine(tid,inst,addr);
 	std::vector<MultiCacheSim *>::iterator i,e;
