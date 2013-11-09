@@ -14,6 +14,7 @@
 #define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define MAX_VC_SIZE 32
+#define BLOCK_HISTORY_QUEUE_SIZE 10
 
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
@@ -74,6 +75,62 @@ class SignalThreadInfo
 };
 typedef std::map< long, SignalThreadInfo > SignalThreadMap;
 typedef SignalThreadMap::iterator SignalThreadIterator;
+
+class SigRaceData
+{
+	public:
+		SigRaceData(VectorClock& ts, Bloom& r, Bloom& w)
+			: ts(ts), r(r), w(w) {}
+
+		VectorClock ts;
+		Bloom r;
+		Bloom w;
+};
+
+typedef std::list<SigRaceData*> BlockHistoryQueue;
+
+class RaceDetectionModule
+{
+	public:
+		RaceDetectionModule() : threadCount(0) { }
+		~RaceDetectionModule()
+		{
+			while(!blockHistoryQueues.empty())
+			{
+				BlockHistoryQueue* queue = blockHistoryQueues.back();
+				blockHistoryQueues.pop_back();
+				while(!queue->empty()) 
+				{
+					delete queue->front();
+					queue->pop_front();
+				}
+				delete queue;
+			}
+		}
+
+		void addSignature(int threadId, SigRaceData* sigRaceData)
+		{
+			BlockHistoryQueue* queue = blockHistoryQueues[threadId];
+			queue->push_front(sigRaceData);
+
+			if (queue->size() > BLOCK_HISTORY_QUEUE_SIZE) 
+			{
+				delete queue->back();
+			}
+		}
+
+		void addProcessor()
+		{
+			threadCount++;
+			blockHistoryQueues.push_back(new std::list<SigRaceData*>);
+		}
+
+	private:
+		std::vector< std::list<SigRaceData*> * > blockHistoryQueues;
+		int threadCount;
+};
+
+RaceDetectionModule rdm;
 
 // <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 TLS_KEY tlsKey;

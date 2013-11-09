@@ -13,7 +13,10 @@ class Bloom
 	public:
 		Bloom(int size, int nfuncs, ...);
 		Bloom();
+		const Bloom& operator=(const Bloom& bloom);
+		Bloom(const Bloom& bloom);
 		~Bloom();
+
 		void add(const unsigned char *s);
 		bool check(const unsigned char *s);
 		void clear();

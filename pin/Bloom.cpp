@@ -59,6 +59,25 @@ void Bloom::add(const unsigned char *s)
 	}
 }
 
+const Bloom& Bloom::operator=(const Bloom& bloom)
+{
+	nfuncs      = bloom.nfuncs;
+	filterSize  = bloom.filterSize;
+
+	filter = (unsigned char *) calloc((filterSize+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
+	funcs  = (hashfunc_t*) malloc(nfuncs*sizeof(hashfunc_t));
+
+	memcpy(filter, bloom.filter, (filterSize+CHAR_BIT-1)/CHAR_BIT);
+	memcpy(funcs, bloom.funcs,nfuncs*sizeof(hashfunc_t));
+
+	return *this;
+}
+
+Bloom::Bloom(const Bloom& bloom)
+{
+	(*this) = bloom;
+}
+
 bool Bloom::check(const unsigned char *s)
 {
 	for(int n=0; n < nfuncs; ++n) 

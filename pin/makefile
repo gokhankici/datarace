@@ -80,7 +80,6 @@ all:	packages tools
 
 packages:	
 	make -C MultiCacheSim-dist/
-	make -C adt/
 
 tools: $(OBJDIR) $(TOOLS) $(OBJDIR)cp-pin.exe
 test: $(OBJDIR) $(TOOL_ROOTS:%=%.test) mytest
@@ -121,5 +120,3 @@ $(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(MY_OBJS)
 ## cleaning
 clean:
 	-rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
-	make -C adt clean
-	make -C MultiCacheSim-dist clean
