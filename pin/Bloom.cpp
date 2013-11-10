@@ -16,7 +16,7 @@ static unsigned int defaultHashFunction(const unsigned char * key)
 
 Bloom::Bloom()
 {
-	int size   = 2048;
+	int size   = DEFAULT_BLOOM_FILTER_SIZE;
 	int nfuncs = 1;
 	
 	filter = (unsigned char *) calloc((size+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
@@ -110,5 +110,5 @@ bool Bloom::check(const unsigned char *s)
 
 void Bloom::clear()
 {
-	memset(filter, 0, filterSize);
+	memset(filter, 0, getFilterSizeInBytes());
 }

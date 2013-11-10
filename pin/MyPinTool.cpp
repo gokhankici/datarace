@@ -202,7 +202,8 @@ WaitQueueMap* waitQueueMap;
 SignalThreadMap* signalledThreadMap;
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-/*static void writeInHex(const unsigned char* data, int len)
+/*
+static void writeInHex(const unsigned char* data, int len)
 {
 	for (int i = 0; i < len; i++) 
 	{
@@ -231,7 +232,8 @@ static void printSignatures()
 	printf("\n\tW: ");
 	writeInHex(writeSig->getFilter(), writeSig->getFilterSizeInBytes());
 	printf("\n");
-}*/
+}
+*/
 
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -267,6 +269,7 @@ VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
 
 	GetLock(&lock, threadId+1);
+	//printSignatures();
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
 	ReleaseLock(&lock);
 
