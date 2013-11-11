@@ -3,7 +3,7 @@
 
 #include <stdlib.h>
 
-#define DEFAULT_BLOOM_FILTER_SIZE 2048
+#define DEFAULT_BLOOM_FILTER_SIZE 10240000
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
 

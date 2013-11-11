@@ -100,6 +100,9 @@ class SigRaceData
 			UINT32 r_r = rhs.ts[rhs.threadId];
 			UINT32 r_l = rhs.ts[threadId];
 
+			printf("lhs: %d, %d\n", l_l, l_r);
+			printf("rhs: %d, %d\n", r_l, r_r);
+
 			// both threads' values are lower in the lhs thread
 			return l_l < r_l && l_r < r_r;
 		}
@@ -164,12 +167,25 @@ class RaceDetectionModule
 						break;
 					}
 
-					if (sigRaceData->r.hasInCommon(other->w) || sigRaceData->w.hasInCommon(other->r) || sigRaceData->w.hasInCommon(other->w)) 
+					if (sigRaceData->r.hasInCommon(other->w)) 
 					{
-						printf("THERE MAY BE A DATA RACE BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						printf("THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						goto OUTER_FOR;
+					}
+					if (sigRaceData->w.hasInCommon(other->r)) 
+					{
+						printf("THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						goto OUTER_FOR;
+					}
+					if (sigRaceData->w.hasInCommon(other->w)) 
+					{
+						printf("THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						goto OUTER_FOR;
 					}
 				}
 			}
+			OUTER_FOR:
+			return;
 		}
 
 		void addProcessor()
@@ -202,38 +218,42 @@ WaitQueueMap* waitQueueMap;
 SignalThreadMap* signalledThreadMap;
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
-/*
-static void writeInHex(const unsigned char* data, int len)
-{
-	for (int i = 0; i < len; i++) 
-	{
-		printf("%02X", data[i]);
-	}
-}
+//static void writeInHex(const unsigned char* data, int len)
+//{
+	//for (int i = 0; i < len; i++) 
+	//{
+		//printf("%02X", data[i]);
+	//}
+//}
 
 static void printSignatures()
 {
 	int tid = PIN_ThreadId();
 	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, tid));
-	Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
-	Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
+	//Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
+	//Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
 
 	printf("Thread %d:\n", tid);
 
 	printf("\tVC: ");
+	int i = 0;
 	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
 	{
+		if(i++ > 2)
+			break;
+
 		printf("%d, ", *vci);
 	}
+	printf("\n\n");
 
-	printf("\n\tR: ");
-	writeInHex(readSig->getFilter(), readSig->getFilterSizeInBytes());
+	//printf("\tR: ");
+	//writeInHex(readSig->getFilter(), readSig->getFilterSizeInBytes());
+	//printf("\n");
 
-	printf("\n\tW: ");
-	writeInHex(writeSig->getFilter(), writeSig->getFilterSizeInBytes());
-	printf("\n");
+	//printf("\tW: ");
+	//writeInHex(writeSig->getFilter(), writeSig->getFilterSizeInBytes());
+	//printf("\n");
 }
-*/
 
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -269,7 +289,7 @@ VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
 
 	GetLock(&lock, threadId+1);
-	//printSignatures();
+	printSignatures();
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
 	ReleaseLock(&lock);
 
@@ -344,19 +364,26 @@ VOID AfterLock (THREADID threadId)
 		return;
 
 	printf("Thread %d acquired a lock[%p].\n", threadId, mutex);
+
+	GetLock(&lock, threadId+1);
+
+	printSignatures();
+
+	// add signature to the rdm
+	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+
+	// increment timestamp
 	(*vectorClock)[threadId]++;
 
-	// get the signalling thread
-	GetLock(&lock, threadId+1);
+	// get the signalling thread and update my timestamp
 	SignalThreadIterator itr = signalledThreadMap->find(CONVERT(long, mutex));
-
 	if(itr != signalledThreadMap->end())
 	{
 		SignalThreadInfo signalThreadInfo = itr->second;
 		if (signalThreadInfo.threadId != NO_ID) 
 		{
 			updateVectorClock(threadId, *vectorClock, signalThreadInfo.vectorClock);
-			printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
+			//printf("Thread %d happens before %d due to lock %p\n", signalThreadInfo.threadId, threadId, mutex);
 		}
 
 		// remove the notify signal
@@ -364,11 +391,7 @@ VOID AfterLock (THREADID threadId)
 		stiItr->second.threadId = NO_ID;
 	}
 
-	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
-	//printSignatures();
-	readFilter->clear();
-	writeFilter->clear();
-
+	// remove myself from the waiting queue
 	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
 	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
 	{
@@ -377,6 +400,9 @@ VOID AfterLock (THREADID threadId)
 	}
 
 	ReleaseLock(&lock);
+
+	readFilter->clear();
+	writeFilter->clear();
 }
 
 VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
@@ -389,36 +415,23 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
 	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
 
+	printf("Thread %d released a lock[%p].\n", threadId, mutex);
+
 	GetLock(&lock, threadId+1);
-	//WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
-	//if(foundQueueItr != waitQueueMap->end())
-	//{
-		//mutexWaitList = foundQueueItr->second;
-	//}
 
-	// In new epoch
-	(*vectorClock)[threadId]++;
+	printSignatures();
 
-	(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
-	/*
-	if (mutexWaitList && mutexWaitList->size()) 
-	{
-		(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
-	}
-	else 
-	{
-		// lost notify
-		(*signalledThreadMap)[CONVERT(long, mutex)].threadId = NO_ID;
-	}
-	*/
-
+	// add current signature to the rdm
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
-	//printSignatures();
-	readFilter->clear();
-	writeFilter->clear();
+	// increment timestamp
+	(*vectorClock)[threadId]++;
+	// update the signalled map with my vector clock
+	(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
 
 	ReleaseLock(&lock);
 
+	readFilter->clear();
+	writeFilter->clear();
 }
 
 // This routine is executed for each image.
