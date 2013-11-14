@@ -83,16 +83,16 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 {
 	assert(filterSize == bloom.filterSize);
 	int byteCount = getFilterSizeInBytes();
-	int same = 0;
+	//int same = 0;
 
 	for(int n = 0; n < byteCount; ++n) 
 	{
 		if(filter[n] & bloom.filter[n])
 		{
-			printf("%02X / %02X (%d) === Bits: %d | Bytes: %d | Byte#: %d\n", filter[n], bloom.filter[n], same, filterSize, byteCount, n);
+			//printf("%02X / %02X (%d) === Bits: %d | Bytes: %d | Byte#: %d\n", filter[n], bloom.filter[n], same, filterSize, byteCount, n);
 			return true;
 		}
-		same++;
+		//same++;
 	}
 
 	return false;
