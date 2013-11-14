@@ -34,7 +34,8 @@ VOID TurnInstrumentationOff(ADDRINT tid)
 	instrumentationStatus[PIN_ThreadId()] = false; 
 }
 
-void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
+//void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
+void Read(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 readSize)
 {
 	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
 	fprintf(out , "R : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
@@ -68,7 +69,8 @@ void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
 	ReleaseLock(&mccLock);
 }
 
-void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
+//void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
+void Write(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 writeSize)
 {
 	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
 	fprintf(out , "W : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));

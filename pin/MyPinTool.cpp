@@ -277,6 +277,7 @@ VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	assert(threadId < MAX_VC_SIZE);
 	VectorClock* vectorClock = new vector<UINT32>(MAX_VC_SIZE, 0);
+	(*vectorClock)[threadId]=1;
 	PIN_SetThreadData(vectorClockKey, vectorClock, threadId);
 }
 
@@ -367,7 +368,6 @@ VOID AfterLock (THREADID threadId)
 
 	GetLock(&lock, threadId+1);
 
-	printSignatures();
 
 	// add signature to the rdm
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
@@ -398,6 +398,7 @@ VOID AfterLock (THREADID threadId)
 		mutexWaitList = foundQueueItr->second;
 		mutexWaitList->remove(threadId);
 	}
+	printSignatures();
 
 	ReleaseLock(&lock);
 
@@ -419,7 +420,6 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 
 	GetLock(&lock, threadId+1);
 
-	printSignatures();
 
 	// add current signature to the rdm
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
@@ -428,6 +428,7 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 	// update the signalled map with my vector clock
 	(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
 
+	printSignatures();
 	ReleaseLock(&lock);
 
 	readFilter->clear();

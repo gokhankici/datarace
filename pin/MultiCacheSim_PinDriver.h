@@ -27,8 +27,10 @@ enum MemOpType { MemRead = 0, MemWrite = 1 };
 VOID TurnInstrumentationOn(ADDRINT tid);
 VOID TurnInstrumentationOff(ADDRINT tid);
 VOID instrumentMCCRoutine(RTN rtn, VOID *v);
-void Read(THREADID tid, ADDRINT addr, ADDRINT inst);
-void Write(THREADID tid, ADDRINT addr, ADDRINT inst);
+
+VOID Read(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 readSize);
+VOID Write(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 writeSize);
+
 VOID instrumentTrace(TRACE trace, VOID *v);
 BOOL segvHandler(THREADID threadid,INT32 sig,CONTEXT *ctx,BOOL hasHndlr,const EXCEPTION_INFO *pExceptInfo, VOID*v);
 BOOL termHandler(THREADID threadid,INT32 sig,CONTEXT *ctx,BOOL hasHndlr,const EXCEPTION_INFO *pExceptInfo, VOID*v);
