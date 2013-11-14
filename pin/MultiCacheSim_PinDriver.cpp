@@ -11,6 +11,8 @@
 #include "MultiCacheSim_PinDriver.h"
 #include "Bloom.h"
 
+ADDRINT STACK_PTR_ERROR = 1000;
+
 std::vector<MultiCacheSim *> Caches;
 MultiCacheSim *ReferenceProtocol;
 PIN_LOCK mccLock;
@@ -34,15 +36,35 @@ VOID TurnInstrumentationOff(ADDRINT tid)
 	instrumentationStatus[PIN_ThreadId()] = false; 
 }
 
-//void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
-void Read(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 readSize)
+BOOL isMemoryGlobal(ADDRINT effectiveAddr, ADDRINT stackPtr)
 {
-	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
-	fprintf(out , "R : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+	//if stack pointer is greater, it is global or in heap --> shared
+	if (static_cast<UINT64> (abs(stackPtr - effectiveAddr)) > STACK_PTR_ERROR) 
+	{
+		return true;
+	}
 
-	Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
-	readSig->add(BLOOM_ADDR(addr));
+	return false;
+}
 
+VOID addToReadFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
+{
+	if (isMemoryGlobal(addr, stackPtr))
+	{
+		FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
+		fprintf(out , "R : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+
+		Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
+		readSig->add(BLOOM_ADDR(addr));
+	}
+}
+
+//void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
+void Read(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName, ADDRINT inst, UINT32 readSize)
+{
+	addToReadFilter(tid, addr, stackPtr);
+
+	/* addition of MultiCacheSim coherency protocols */
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->readLine(tid,inst,addr);
 	std::vector<MultiCacheSim *>::iterator i,e;
@@ -69,14 +91,22 @@ void Read(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char
 	ReleaseLock(&mccLock);
 }
 
-//void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
-void Write(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const char* imageName, ADDRINT insPtr, UINT32 writeSize)
+VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 {
-	FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
-	fprintf(out , "W : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+	if (isMemoryGlobal(addr, stackPtr))
+	{
+		FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
+		fprintf(out , "W : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr)));
 
-	Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
-	writeSig->add(BLOOM_ADDR(addr));
+		Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
+		writeSig->add(BLOOM_ADDR(addr));
+	}
+}
+
+//void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
+void Write(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName, ADDRINT inst, UINT32 writeSize)
+{
+	addToWriteFilter(tid, addr, stackPtr);
 
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->writeLine(tid,inst,addr);
@@ -105,32 +135,62 @@ void Write(THREADID threadid, ADDRINT effectiveAddr, ADDRINT stackPtr, const cha
 	ReleaseLock(&mccLock);
 }
 
+void processMemoryWriteInstruction(INS ins, const char* imageName)
+{
+	UINT32 memoryOperandCount = INS_MemoryOperandCount(ins);
+	for(UINT32 i = 0; i < memoryOperandCount; ++i)
+	{
+		if (INS_MemoryOperandIsWritten(ins,i) && INS_OperandIsMemory(ins,i))
+		{
+			INS_InsertPredicatedCall(
+					ins, IPOINT_BEFORE, (AFUNPTR)Write,
+					IARG_THREAD_ID,
+					IARG_MEMORYOP_EA, i,
+					IARG_REG_VALUE, REG_STACK_PTR, //pass current stack ptr
+					IARG_PTR, imageName,
+					IARG_INST_PTR,
+					IARG_MEMORYWRITE_SIZE,
+					IARG_CALL_ORDER, CALL_ORDER_FIRST + 30,
+					IARG_END);
+		}
+	}
+}
+
+void processMemoryReadInstruction(INS ins, const char* imageName)
+{
+	UINT32 memoryOperandCount = INS_MemoryOperandCount(ins);
+	for(UINT32 i = 0; i < memoryOperandCount; ++i)
+		if (INS_MemoryOperandIsRead(ins, i))
+		{
+
+			INS_InsertPredicatedCall(
+					ins, IPOINT_BEFORE, (AFUNPTR)Read,
+					IARG_THREAD_ID,
+					IARG_MEMORYOP_EA, i,
+					IARG_REG_VALUE, REG_STACK_PTR,//pass current stack ptr
+					IARG_PTR, imageName,
+					IARG_INST_PTR,
+					IARG_MEMORYWRITE_SIZE,
+					IARG_CALL_ORDER, CALL_ORDER_FIRST + 30,
+					IARG_END);
+		}
+}
+
 VOID instrumentTrace(TRACE trace, VOID *v)
 {
+	IMG img = IMG_FindByAddress(TRACE_Address(trace));
+
+	if (!IMG_Valid(img) || !IMG_IsMainExecutable(img) )
+		return;
+
+	const char* imageName = IMG_Name(img).c_str();
+
 	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl)) 
 	{
 		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins)) 
 		{  
-			if(INS_IsMemoryRead(ins)) 
-			{
-				INS_InsertCall(ins, 
-						IPOINT_BEFORE, 
-						(AFUNPTR)Read, 
-						IARG_THREAD_ID,
-						IARG_MEMORYREAD_EA,
-						IARG_INST_PTR,
-						IARG_END);
-			} 
-			else if(INS_IsMemoryWrite(ins)) 
-			{
-				INS_InsertCall(ins, 
-						IPOINT_BEFORE, 
-						(AFUNPTR)Write, 
-						IARG_THREAD_ID,//thread id
-						IARG_MEMORYWRITE_EA,//address being accessed
-						IARG_INST_PTR,//instruction address of write
-						IARG_END);
-			}
+			processMemoryWriteInstruction(ins, imageName);
+			processMemoryReadInstruction(ins, imageName);
 		}
 	}
 }

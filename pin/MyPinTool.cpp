@@ -100,9 +100,6 @@ class SigRaceData
 			UINT32 r_r = rhs.ts[rhs.threadId];
 			UINT32 r_l = rhs.ts[threadId];
 
-			printf("lhs: %d, %d\n", l_l, l_r);
-			printf("rhs: %d, %d\n", r_l, r_r);
-
 			// both threads' values are lower in the lhs thread
 			return l_l < r_l && l_r < r_r;
 		}
@@ -290,6 +287,7 @@ VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
 
 	GetLock(&lock, threadId+1);
+	(*vectorClock)[threadId]++;
 	printSignatures();
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
 	ReleaseLock(&lock);
@@ -357,6 +355,7 @@ static void updateVectorClock(UINT32 myThreadId, VectorClock& myClock, VectorClo
 VOID AfterLock (THREADID threadId)
 {
 	WaitQueue* mutexWaitList = NULL;
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
 	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadId));
 	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
 	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
@@ -371,6 +370,7 @@ VOID AfterLock (THREADID threadId)
 
 	// add signature to the rdm
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- MUTEX LOCK ---\n");
 
 	// increment timestamp
 	(*vectorClock)[threadId]++;
@@ -412,6 +412,7 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 		return;
 
 	//WaitQueue* mutexWaitList = NULL;
+	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
 	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
 	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
 	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
@@ -423,6 +424,8 @@ VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
 
 	// add current signature to the rdm
 	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- MUTEX UNLOCK ---\n");
+
 	// increment timestamp
 	(*vectorClock)[threadId]++;
 	// update the signalled map with my vector clock
