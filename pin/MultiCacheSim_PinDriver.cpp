@@ -50,7 +50,7 @@ VOID addToReadFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 	{
 		ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 		FILE* out   = tls->out;
-		Bloom* readSig = tls->writeBloomFilter;
+		Bloom* readSig = tls->readBloomFilter;
 
 		fprintf(out , "R : %lX\n", addr);
 		readSig->add(BLOOM_ADDR(addr));

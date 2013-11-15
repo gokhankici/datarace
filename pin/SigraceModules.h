@@ -45,8 +45,8 @@ class SignalThreadInfo
 
 		void update(UINT32 tid, const VectorClock& vc)
 		{
-			tid    = tid;
-			vectorClock = vc;
+			this->tid    = tid;
+			this->vectorClock = vc;
 		}
 };
 typedef std::map< long, SignalThreadInfo > SignalThreadMap;
@@ -140,16 +140,19 @@ class RaceDetectionModule
 					if (sigRaceData->r.hasInCommon(other->w)) 
 					{
 						fprintf(stderr, "THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
+						fflush(stderr);
 						goto OUTER_FOR;
 					}
 					else if (sigRaceData->w.hasInCommon(other->r)) 
 					{
 						fprintf(stderr, "THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
+						fflush(stderr);
 						goto OUTER_FOR;
 					}
 					else if (sigRaceData->w.hasInCommon(other->w)) 
 					{
 						fprintf(stderr, "THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
+						fflush(stderr);
 						goto OUTER_FOR;
 					}
 				}

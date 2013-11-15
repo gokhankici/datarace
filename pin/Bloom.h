@@ -1,11 +1,16 @@
 #ifndef __BLOOM_H__
 #define __BLOOM_H__
 
+#include "pin.H"
 #include <stdlib.h>
+
+#include <vector>
+#include <set>
 
 #define DEFAULT_BLOOM_FILTER_SIZE 10240000
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
+//#define SET_OVERRIDE
 
 typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
@@ -32,6 +37,10 @@ class Bloom
 		unsigned char *filter;
 		int nfuncs;
 		hashfunc_t *funcs;
+
+#ifdef SET_OVERRIDE
+		std::set<ADDRINT> locations;
+#endif
 };
 
 #endif

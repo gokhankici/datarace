@@ -72,6 +72,7 @@ static void printSignatures()
 		printf("%d, ", *vci);
 	}
 	printf("\n\n");
+	fflush(stdout);
 
 	//printf("\tR: ");
 	//writeInHex(readSig->getFilter(), readSig->getFilterSizeInBytes());
@@ -92,10 +93,8 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	ThreadLocalStorage* tls = new ThreadLocalStorage();
 
-	Bloom* readBloomFilter = new Bloom();
-	Bloom* writeBloomFilter = new Bloom();
-	tls->readBloomFilter = readBloomFilter;
-	tls->writeBloomFilter = writeBloomFilter;
+	tls->readBloomFilter = new Bloom();
+	tls->writeBloomFilter = new Bloom();
 
 	string filename = KnobOutputFile.Value() +"." + decstr(tid);
 	FILE* out       = fopen(filename.c_str(), "w");
@@ -136,15 +135,15 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 VOID BeforeLock (ADDRINT lockAddr, THREADID tid)
 {
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
-	/*if(CONVERT(long, lockAddr) > MUTEX_POINTER_LIMIT)
+	tls->lockAddr = lockAddr;
+
+	if(lockAddr > MUTEX_POINTER_LIMIT)
 	{
-		tls->lockAddr = lockAddr;
 		return;
-	}*/
+	}
 
 	WaitQueue* mutexWaitList = NULL;
 	// point to the current mutex
-	tls->lockAddr = lockAddr;
 
 	GetLock(&lock, tid+1);
 
@@ -184,6 +183,12 @@ static void updateVectorClock(UINT32 myThreadId, VectorClock& myClock, VectorClo
 VOID AfterLock (THREADID tid)
 {
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+
+	if(tls->lockAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
+
 	WaitQueue* mutexWaitList = NULL;
 	FILE* out   = tls->out;
 	ADDRINT lockAddr = tls->lockAddr;
@@ -191,11 +196,9 @@ VOID AfterLock (THREADID tid)
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
 
-	/*if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
-		return;*/
-
 #ifdef DEBUG_MODE
-		printf("Thread %d acquired a lock[%ld].\n", tid, lockAddr);
+	printf("Thread %d acquired a lock[%lX].\n", tid, lockAddr);
+	fflush(stdout);
 #endif
 
 	GetLock(&lock, tid+1);
@@ -239,8 +242,10 @@ VOID AfterLock (THREADID tid)
 
 VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid)
 {
-	/*if(CONVERT(long, lockAddr) > MUTEX_POINTER_LIMIT)
-		return;*/
+	if(lockAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
 
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 	FILE* out   = tls->out;
@@ -249,7 +254,8 @@ VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
-	printf("Thread %d released a lock[%ld].\n", tid, lockAddr);
+	printf("Thread %d released a lock[%lX].\n", tid, lockAddr);
+	fflush(stdout);
 #endif
 
 	GetLock(&lock, tid+1);

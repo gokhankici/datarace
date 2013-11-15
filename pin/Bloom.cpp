@@ -3,6 +3,9 @@
 #include <string.h>
 #include <assert.h>
 
+#include <iostream>
+#include <algorithm>
+
 #include "Bloom.h"
 #include "MurmurHash2.h"
 
@@ -54,10 +57,14 @@ Bloom::~Bloom()
 
 void Bloom::add(const unsigned char *s)
 {
+#ifndef SET_OVERRIDE
 	for(int n=0; n < nfuncs; ++n) 
 	{
 		SETBIT(filter, funcs[n](s)%filterSize);
 	}
+#else
+	locations.insert(*((ADDRINT*) s));
+#endif
 }
 
 const Bloom& Bloom::operator=(const Bloom& bloom)
@@ -71,6 +78,10 @@ const Bloom& Bloom::operator=(const Bloom& bloom)
 	memcpy(filter, bloom.filter, (filterSize+CHAR_BIT-1)/CHAR_BIT);
 	memcpy(funcs, bloom.funcs,nfuncs*sizeof(hashfunc_t));
 
+#ifdef SET_OVERRIDE
+	locations = bloom.locations;
+#endif
+
 	return *this;
 }
 
@@ -81,25 +92,59 @@ Bloom::Bloom(const Bloom& bloom)
 
 bool Bloom::hasInCommon(const Bloom& bloom)
 {
+#ifndef SET_OVERRIDE
 	assert(filterSize == bloom.filterSize);
 	int byteCount = getFilterSizeInBytes();
-	//int same = 0;
+	int same = 0;
 
 	for(int n = 0; n < byteCount; ++n) 
 	{
 		if(filter[n] & bloom.filter[n])
 		{
-			//printf("%02X / %02X (%d) === Bits: %d | Bytes: %d | Byte#: %d\n", filter[n], bloom.filter[n], same, filterSize, byteCount, n);
+#ifdef DEBUG_MODE
+			printf("%02X / %02X (%d) === Bits: %d | Bytes: %d | Byte#: %d\n", filter[n], bloom.filter[n], same, filterSize, byteCount, n);
+#endif
 			return true;
 		}
-		//same++;
+		same++;
 	}
 
 	return false;
+#else
+	std::vector<ADDRINT> v_intersection;
+	std::set_intersection(locations.begin(), locations.end(),
+			bloom.locations.begin(), bloom.locations.end(),
+			std::back_inserter(v_intersection));
+
+	if(v_intersection.size())
+	{
+		cout << "Filter 1" << endl;
+		for (std::set<ADDRINT>::iterator it=locations.begin(); it!=locations.end(); ++it)
+			printf("%lX, ", *it);
+		printf("\n");
+
+		cout << "Filter 2" << endl;
+		for (std::set<ADDRINT>::iterator it=bloom.locations.begin(); it!=bloom.locations.end(); ++it)
+			printf("%lX, ", *it);
+		printf("\n");
+
+		printf("Same elements: \n");
+		for (unsigned int i = 0; i < v_intersection.size(); i++) 
+		{
+			printf("%lX, ", v_intersection[i]);
+		}
+		printf("\n");
+		fflush(stdout);
+
+		return true;
+	}
+	return false;
+#endif
 }
 
 bool Bloom::check(const unsigned char *s)
 {
+#ifndef SET_OVERRIDE
 	for(int n=0; n < nfuncs; ++n) 
 	{
 		if(!(GETBIT(filter, funcs[n](s)%filterSize)))
@@ -107,11 +152,17 @@ bool Bloom::check(const unsigned char *s)
 			return false;
 		}
 	}
-
 	return true;
+#else
+	return locations.find(*((ADDRINT*) s)) != locations.end();
+#endif
 }
 
 void Bloom::clear()
 {
 	memset(filter, 0, getFilterSizeInBytes());
+
+#ifdef SET_OVERRIDE
+	locations.clear();
+#endif
 }
