@@ -1,6 +1,8 @@
 #ifndef _SIGRACE_MODULES_H_
 #define _SIGRACE_MODULES_H_
 
+#include "pin.H"
+
 #include <iostream>
 #include <iterator>
 #include <stdio.h>
@@ -18,24 +20,24 @@ typedef vector<UINT32> VectorClock;
  * IMPLEMENTATION OF WAITING QUEUE
  */
 typedef std::list<UINT32> WaitQueue;
-typedef std::map< long, WaitQueue* > WaitQueueMap;
+typedef std::map< ADDRINT, WaitQueue* > WaitQueueMap;
 typedef WaitQueueMap::iterator WaitQueueIterator;
 
 class SignalThreadInfo 
 {
 	public:
-		UINT32 threadId;
+		UINT32 tid;
 		VectorClock vectorClock;
 
-		SignalThreadInfo() : threadId(NO_ID) {}
+		SignalThreadInfo() : tid(NO_ID) {}
 
-		SignalThreadInfo (UINT32 threadId, const VectorClock& vc) :
-			threadId(threadId), vectorClock(vc) {}
+		SignalThreadInfo (UINT32 tid, const VectorClock& vc) :
+			tid(tid), vectorClock(vc) {}
 
 		SignalThreadInfo& operator= (const SignalThreadInfo& other)
 		{
 			SignalThreadInfo temp (other);
-			threadId = other.threadId;
+			tid = other.tid;
 			vectorClock = other.vectorClock;
 
 			return *this;
@@ -43,7 +45,7 @@ class SignalThreadInfo
 
 		void update(UINT32 tid, const VectorClock& vc)
 		{
-			threadId    = tid;
+			tid    = tid;
 			vectorClock = vc;
 		}
 };
@@ -56,26 +58,26 @@ typedef SignalThreadMap::iterator SignalThreadIterator;
 class SigRaceData
 {
 	public:
-		SigRaceData(int threadId, VectorClock& ts, Bloom& r, Bloom& w)
-			: threadId(threadId), ts(ts), r(r), w(w) {}
+		SigRaceData(int tid, VectorClock& ts, Bloom& r, Bloom& w)
+			: tid(tid), ts(ts), r(r), w(w) {}
 
 		bool operator<(const SigRaceData& rhs )
 		{
-			if (threadId == rhs.threadId) 
+			if (tid == rhs.tid) 
 			{
-				return ts[threadId] < rhs.ts[rhs.threadId];
+				return ts[tid] < rhs.ts[rhs.tid];
 			}
 
-			UINT32 l_l = ts[threadId];
-			UINT32 l_r = ts[rhs.threadId];
-			UINT32 r_r = rhs.ts[rhs.threadId];
-			UINT32 r_l = rhs.ts[threadId];
+			UINT32 l_l = ts[tid];
+			UINT32 l_r = ts[rhs.tid];
+			UINT32 r_r = rhs.ts[rhs.tid];
+			UINT32 r_l = rhs.ts[tid];
 
 			// both threads' values are lower in the lhs thread
 			return l_l < r_l && l_r < r_r;
 		}
 
-		UINT32 threadId;
+		UINT32 tid;
 		VectorClock ts;
 		Bloom r;
 		Bloom w;
@@ -107,7 +109,7 @@ class RaceDetectionModule
 		void addSignature(SigRaceData* sigRaceData)
 		{
 			// add it to the queue
-			BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->threadId];
+			BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
 			queue->push_front(sigRaceData);
 
 			if (queue->size() > BLOCK_HISTORY_QUEUE_SIZE) 
@@ -119,7 +121,7 @@ class RaceDetectionModule
 			// check it with other threads' values
 			for (UINT32 queueId = 0; queueId < blockHistoryQueues.size(); queueId++) 
 			{
-				if(queueId == sigRaceData->threadId)
+				if(queueId == sigRaceData->tid)
 				{
 					continue;
 				}
@@ -137,17 +139,17 @@ class RaceDetectionModule
 
 					if (sigRaceData->r.hasInCommon(other->w)) 
 					{
-						printf("THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						fprintf(stderr, "THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
 						goto OUTER_FOR;
 					}
 					else if (sigRaceData->w.hasInCommon(other->r)) 
 					{
-						printf("THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						fprintf(stderr, "THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
 						goto OUTER_FOR;
 					}
 					else if (sigRaceData->w.hasInCommon(other->w)) 
 					{
-						printf("THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->threadId, other->threadId);
+						fprintf(stderr, "THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
 						goto OUTER_FOR;
 					}
 				}

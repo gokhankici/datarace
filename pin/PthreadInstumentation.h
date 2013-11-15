@@ -22,13 +22,31 @@ extern KNOB<unsigned int> KnobNumCaches;
 extern KNOB<string> KnobProtocol;
 extern KNOB<string> KnobReference;
 
-//static void writeInHex(const unsigned char* data, int len)
-//{
-	//for (int i = 0; i < len; i++) 
-	//{
-		//printf("%02X", data[i]);
-	//}
-//}
+/*INSTRUMENTATION FUNCTIONS - FORWARD DECLARATIONS*/
+VOID ImageLoad (IMG img, VOID *);
+VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v);
+VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
+VOID BeforeLock (ADDRINT lockAddr, THREADID tid);
+VOID AfterLock (THREADID tid);
+VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid);
+VOID BeforePthreadCreate(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID BeforePthreadJoin(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID BeforeCondWait(ADDRINT condVarAddr,ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID AfterCondWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
+
+/*INSTRUMENTATION FUNCTIONS - IMPLEMENTATIONS*/
+/*static void writeInHex(const unsigned char* data, int len)
+{
+	for (int i = 0; i < len; i++) 
+	{
+		printf("%02X", data[i]);
+	}
+}*/
 
 static void printSignatures()
 {
@@ -37,7 +55,8 @@ static void printSignatures()
 #endif
 
 	int tid = PIN_ThreadId();
-	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, tid));
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	VectorClock* vectorClock = tls->vectorClock;
 	//Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
 	//Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
 
@@ -64,73 +83,72 @@ static void printSignatures()
 }
 
 // This routine is executed every time a thread is created.
-VOID ThreadStart(THREADID threadId, CONTEXT *ctxt, INT32 flags, VOID *v)
+VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	GetLock(&lock, threadId+1);
+	GetLock(&lock, tid+1);
 	++globalId;
 	rdm.addProcessor();
 	ReleaseLock(&lock);
 
+	ThreadLocalStorage* tls = new ThreadLocalStorage();
+
 	Bloom* readBloomFilter = new Bloom();
-	PIN_SetThreadData(tlsReadSignatureKey, readBloomFilter, threadId);
 	Bloom* writeBloomFilter = new Bloom();
-	PIN_SetThreadData(tlsWriteSignatureKey, writeBloomFilter, threadId);
+	tls->readBloomFilter = readBloomFilter;
+	tls->writeBloomFilter = writeBloomFilter;
 
-	string filename = KnobOutputFile.Value() +"." + decstr(threadId);
+	string filename = KnobOutputFile.Value() +"." + decstr(tid);
 	FILE* out       = fopen(filename.c_str(), "w");
-	fprintf(out, "thread begins... PIN_TID:%d OS_TID:0x%x\n",threadId,PIN_GetTid());
+	fprintf(out, "thread begins... PIN_TID:%d OS_TID:0x%x\n",tid,PIN_GetTid());
 	fflush(out);
-	PIN_SetThreadData(tlsKey, out, threadId);
-	PIN_SetThreadData(mutexPtrKey, 0, threadId);
+	tls->out = out;
 
-	assert(threadId < MAX_VC_SIZE);
+	assert(tid < MAX_VC_SIZE);
 	VectorClock* vectorClock = new vector<UINT32>(MAX_VC_SIZE, 0);
-	(*vectorClock)[threadId]=1;
-	PIN_SetThreadData(vectorClockKey, vectorClock, threadId);
+	(*vectorClock)[tid]=1;
+	tls->vectorClock = vectorClock;
+
+	PIN_SetThreadData(tlsKey, tls, tid);
 }
 
 // This routine is executed every time a thread is destroyed.
-VOID ThreadFini(THREADID threadId, const CONTEXT *ctxt, INT32 code, VOID *v)
+VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
-	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
-	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
-	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
 
-	GetLock(&lock, threadId+1);
-	(*vectorClock)[threadId]++;
+	GetLock(&lock, tid+1);
+	(*vectorClock)[tid]++;
 	printSignatures();
-	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	ReleaseLock(&lock);
 
-	delete vectorClock;
-	delete readFilter;
-	delete writeFilter;
-
 	fclose(out);
-	PIN_SetThreadData(tlsKey, 0, threadId);
-	PIN_SetThreadData(mutexPtrKey, 0, threadId);
-	PIN_SetThreadData(vectorClockKey, 0, threadId);
-	PIN_SetThreadData(tlsReadSignatureKey, 0, threadId);
-	PIN_SetThreadData(tlsWriteSignatureKey, 0, threadId);
+	delete tls;
+
+	PIN_SetThreadData(tlsKey, 0, tid);
 }
 
 // This routine is executed each time lock is called.
-VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadId)
+VOID BeforeLock (ADDRINT lockAddr, THREADID tid)
 {
-	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	/*if(CONVERT(long, lockAddr) > MUTEX_POINTER_LIMIT)
 	{
-		PIN_SetThreadData(mutexPtrKey, mutex, threadId);
+		tls->lockAddr = lockAddr;
 		return;
-	}
+	}*/
 
 	WaitQueue* mutexWaitList = NULL;
 	// point to the current mutex
-	PIN_SetThreadData(mutexPtrKey, mutex, threadId);
+	tls->lockAddr = lockAddr;
 
-	GetLock(&lock, threadId+1);
+	GetLock(&lock, tid+1);
 
-	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(lockAddr);
 	if(foundQueueItr != waitQueueMap->end())
 	{
 		mutexWaitList = foundQueueItr->second;
@@ -138,13 +156,13 @@ VOID BeforeLock (pthread_mutex_t * mutex, THREADID threadId)
 
 	if (mutexWaitList) 
 	{
-		mutexWaitList->push_back(threadId);
+		mutexWaitList->push_back(tid);
 	}
 	else
 	{
 		mutexWaitList = new std::list<UINT32>;
-		mutexWaitList->push_back(threadId);
-		(*waitQueueMap)[CONVERT(long, mutex)] = mutexWaitList;
+		mutexWaitList->push_back(tid);
+		(*waitQueueMap)[lockAddr] = mutexWaitList;
 	}
 
 	ReleaseLock(&lock);
@@ -163,51 +181,53 @@ static void updateVectorClock(UINT32 myThreadId, VectorClock& myClock, VectorClo
 	}
 }
 
-VOID AfterLock (THREADID threadId)
+VOID AfterLock (THREADID tid)
 {
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 	WaitQueue* mutexWaitList = NULL;
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
-	pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(PIN_GetThreadData(mutexPtrKey, threadId));
-	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
-	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
-	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
-	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
-		return;
+	FILE* out   = tls->out;
+	ADDRINT lockAddr = tls->lockAddr;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
+
+	/*if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
+		return;*/
 
 #ifdef DEBUG_MODE
-		printf("Thread %d acquired a lock[%p].\n", threadId, mutex);
+		printf("Thread %d acquired a lock[%ld].\n", tid, lockAddr);
 #endif
 
-	GetLock(&lock, threadId+1);
+	GetLock(&lock, tid+1);
 
 	// add signature to the rdm
-	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	fprintf(out, "--- MUTEX LOCK ---\n");
 
 	// increment timestamp
-	(*vectorClock)[threadId]++;
+	(*vectorClock)[tid]++;
 
 	// get the signalling thread and update my timestamp
-	SignalThreadIterator itr = signalledThreadMap->find(CONVERT(long, mutex));
+	SignalThreadIterator itr = signalledThreadMap->find(lockAddr);
 	if(itr != signalledThreadMap->end())
 	{
 		SignalThreadInfo signalThreadInfo = itr->second;
-		if (signalThreadInfo.threadId != NO_ID) 
+		if (signalThreadInfo.tid != NO_ID) 
 		{
-			updateVectorClock(threadId, *vectorClock, signalThreadInfo.vectorClock);
+			updateVectorClock(tid, *vectorClock, signalThreadInfo.vectorClock);
 		}
 
 		// remove the notify signal
-		SignalThreadIterator stiItr = signalledThreadMap->find(CONVERT(long, mutex));
-		stiItr->second.threadId = NO_ID;
+		SignalThreadIterator stiItr = signalledThreadMap->find(lockAddr);
+		stiItr->second.tid = NO_ID;
 	}
 
 	// remove myself from the waiting queue
-	WaitQueueIterator foundQueueItr = waitQueueMap->find(CONVERT(long, mutex));
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(lockAddr);
 	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
 	{
 		mutexWaitList = foundQueueItr->second;
-		mutexWaitList->remove(threadId);
+		mutexWaitList->remove(tid);
 	}
 	printSignatures();
 
@@ -217,30 +237,31 @@ VOID AfterLock (THREADID threadId)
 	writeFilter->clear();
 }
 
-VOID BeforeUnlock (pthread_mutex_t * mutex, THREADID threadId)
+VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid)
 {
-	if(CONVERT(long, mutex) > MUTEX_POINTER_LIMIT)
-		return;
+	/*if(CONVERT(long, lockAddr) > MUTEX_POINTER_LIMIT)
+		return;*/
 
-	FILE* out   = static_cast<FILE*>(PIN_GetThreadData(tlsKey, threadId));
-	VectorClock* vectorClock = static_cast<VectorClock*>(PIN_GetThreadData(vectorClockKey, threadId));
-	Bloom* readFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, threadId));
-	Bloom* writeFilter = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, threadId));
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
-		printf("Thread %d released a lock[%p].\n", threadId, mutex);
+	printf("Thread %d released a lock[%ld].\n", tid, lockAddr);
 #endif
 
-	GetLock(&lock, threadId+1);
+	GetLock(&lock, tid+1);
 
 	// add current signature to the rdm
-	rdm.addSignature(new SigRaceData(threadId, *vectorClock, *readFilter, *writeFilter));
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	fprintf(out, "--- MUTEX UNLOCK ---\n");
 
 	// increment timestamp
-	(*vectorClock)[threadId]++;
+	(*vectorClock)[tid]++;
 	// update the signalled map with my vector clock
-	(*signalledThreadMap)[CONVERT(long, mutex)].update(threadId, *vectorClock);
+	(*signalledThreadMap)[lockAddr].update(tid, *vectorClock);
 
 	printSignatures();
 	ReleaseLock(&lock);
@@ -299,5 +320,51 @@ VOID ImageLoad (IMG img, VOID *)
 		RTN_Close(rtn);
 	}
 }
+
+VOID BeforePthreadCreate(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforePthreadJoin(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeCondWait(ADDRINT condVarAddr,ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID AfterCondWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
 
 #endif

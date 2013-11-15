@@ -8,6 +8,7 @@
 #include <string.h>
 #include <dlfcn.h>
 
+#include "GlobalVariables.h"
 #include "MultiCacheSim_PinDriver.h"
 #include "Bloom.h"
 
@@ -16,10 +17,6 @@ ADDRINT STACK_PTR_ERROR = 1000;
 std::vector<MultiCacheSim *> Caches;
 MultiCacheSim *ReferenceProtocol;
 PIN_LOCK mccLock;
-
-extern TLS_KEY tlsKey;
-extern TLS_KEY tlsWriteSignatureKey;
-extern TLS_KEY tlsReadSignatureKey;
 
 bool stopOnError = false;
 bool printOnError = false;
@@ -51,10 +48,11 @@ VOID addToReadFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 {
 	if (isMemoryGlobal(addr, stackPtr))
 	{
-		FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
-		fprintf(out , "R : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr) ));
+		ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+		FILE* out   = tls->out;
+		Bloom* readSig = tls->writeBloomFilter;
 
-		Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
+		fprintf(out , "R : %lX\n", addr);
 		readSig->add(BLOOM_ADDR(addr));
 	}
 }
@@ -95,10 +93,11 @@ VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 {
 	if (isMemoryGlobal(addr, stackPtr))
 	{
-		FILE* out = static_cast<FILE*>(PIN_GetThreadData(tlsKey, tid));
-		fprintf(out , "W : %lX\n", *( (long unsigned int*) BLOOM_ADDR(addr)));
+		ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+		FILE* out   = tls->out;
+		Bloom* writeSig = tls->writeBloomFilter;
+		fprintf(out , "W : %lX\n", addr);
 
-		Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
 		writeSig->add(BLOOM_ADDR(addr));
 	}
 }

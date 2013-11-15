@@ -38,11 +38,6 @@ KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference", "/home/g
 
 // <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 TLS_KEY tlsKey;
-TLS_KEY mutexPtrKey;
-
-TLS_KEY vectorClockKey;
-TLS_KEY tlsWriteSignatureKey;
-TLS_KEY tlsReadSignatureKey;
 // >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
 
 // <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
@@ -84,12 +79,7 @@ int main (INT32 argc, CHAR **argv)
 
 	waitQueueMap = new WaitQueueMap;
 	signalledThreadMap = new SignalThreadMap;
-
-	tlsKey         = PIN_CreateThreadDataKey(0);
-	mutexPtrKey    = PIN_CreateThreadDataKey(0);
-	vectorClockKey = PIN_CreateThreadDataKey(0);
-	tlsReadSignatureKey = PIN_CreateThreadDataKey(0);
-	tlsWriteSignatureKey = PIN_CreateThreadDataKey(0);
+	tlsKey = PIN_CreateThreadDataKey(0);
 
 	for(int i = 0; i < MAX_NTHREADS; i++)
 	{
@@ -151,8 +141,7 @@ int main (INT32 argc, CHAR **argv)
 		exit(1);
 	}
 
-	ReferenceProtocol = 
-		new MultiCacheSim(stdout, csize, assoc, bsize, cfac);
+	ReferenceProtocol = new MultiCacheSim(stdout, csize, assoc, bsize, cfac);
 
 	for(unsigned int i = 0; i < num; i++)
 	{
