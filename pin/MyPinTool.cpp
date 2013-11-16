@@ -44,8 +44,10 @@ TLS_KEY tlsKey;
 UINT32 globalId=0;
 PIN_LOCK lock;
 
-WaitQueueMap* waitQueueMap;
-SignalThreadMap* signalledThreadMap;
+//WaitQueueMap* waitQueueMap;
+UnlockThreadMap* unlockedThreadMap;
+NotifyThreadMap* notifiedThreadMap;
+PthreadTidMap tidMap;
 
 RaceDetectionModule rdm;
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -77,8 +79,9 @@ int main (INT32 argc, CHAR **argv)
 	InitLock(&mccLock);
 	InitLock(&lock);
 
-	waitQueueMap = new WaitQueueMap;
-	signalledThreadMap = new SignalThreadMap;
+	//waitQueueMap = new WaitQueueMap;
+	unlockedThreadMap = new UnlockThreadMap;
+	notifiedThreadMap = new NotifyThreadMap;
 	tlsKey = PIN_CreateThreadDataKey(0);
 
 	for(int i = 0; i < MAX_NTHREADS; i++)

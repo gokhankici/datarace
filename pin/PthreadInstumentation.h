@@ -7,9 +7,14 @@
 #include "SigraceModules.h"
 #include "Bloom.h"
 
-extern WaitQueueMap* waitQueueMap;
-extern SignalThreadMap* signalledThreadMap;
+extern UINT32 globalId;
+extern PIN_LOCK lock;
+
+//extern WaitQueueMap* waitQueueMap;
+extern UnlockThreadMap* unlockedThreadMap;
+extern NotifyThreadMap* notifiedThreadMap;
 extern RaceDetectionModule rdm;
+extern PthreadTidMap tidMap;
 
 extern KNOB<string> KnobOutputFile;
 extern KNOB<bool> KnobStopOnError;
@@ -29,17 +34,22 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
 VOID BeforeLock (ADDRINT lockAddr, THREADID tid);
 VOID AfterLock (THREADID tid);
 VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid);
-VOID BeforePthreadCreate(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID BeforePthreadJoin(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID BeforeCondWait(ADDRINT condVarAddr,ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID AfterCondWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
-VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr);
 
-/*INSTRUMENTATION FUNCTIONS - IMPLEMENTATIONS*/
+VOID BeforePthreadCreate(pthread_t* ptid, THREADID id);
+VOID AfterPthreadCreate(THREADID tid);
+VOID BeforePthreadJoin(pthread_t ptid, THREADID id);
+VOID AfterPthreadJoin(THREADID tid);
+
+VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID id);
+VOID AfterCondWait(THREADID id);
+
+VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id);
+VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id);
+
+VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id);
+VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id);
+VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id);
+
 /*static void writeInHex(const unsigned char* data, int len)
 {
 	for (int i = 0; i < len; i++) 
@@ -56,6 +66,7 @@ static void printSignatures()
 
 	int tid = PIN_ThreadId();
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	//Bloom* readSig = static_cast<Bloom*>(PIN_GetThreadData(tlsReadSignatureKey, tid));
 	//Bloom* writeSig = static_cast<Bloom*>(PIN_GetThreadData(tlsWriteSignatureKey, tid));
@@ -63,15 +74,14 @@ static void printSignatures()
 	printf("Thread %d:\n", tid);
 
 	printf("\tVC: ");
-	int i = 0;
-	for (VectorClock::iterator vci = vectorClock->begin(); vci != vectorClock->end() ; vci++) 
+	fprintf(out, "--- VC: ");
+	for (unsigned int i = 0; i <globalId; i++) 
 	{
-		if(i++ > 2)
-			break;
-
-		printf("%d, ", *vci);
+		printf("%d, ", (*vectorClock)[i]);
+		fprintf(out, "%d, ", (*vectorClock)[i]);
 	}
 	printf("\n\n");
+	fprintf(out, "---\n");
 	fflush(stdout);
 
 	//printf("\tR: ");
@@ -120,15 +130,37 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 	GetLock(&lock, tid+1);
-	(*vectorClock)[tid]++;
 	printSignatures();
 	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	//(*vectorClock)[tid]++;
 	ReleaseLock(&lock);
 
 	fclose(out);
 	delete tls;
 
 	PIN_SetThreadData(tlsKey, 0, tid);
+}
+
+VOID BeforePthreadCreate(pthread_t* ptid, THREADID tid)
+{
+	//ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	//tls->createdThread = ptid;
+}
+
+VOID AfterPthreadCreate(THREADID tid)
+{
+
+}
+
+VOID BeforePthreadJoin(pthread_t ptid, THREADID tid)
+{
+	//ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	//tls->joinedThread = ptid;
+}
+
+VOID AfterPthreadJoin(THREADID tid)
+{
+
 }
 
 // This routine is executed each time lock is called.
@@ -141,30 +173,6 @@ VOID BeforeLock (ADDRINT lockAddr, THREADID tid)
 	{
 		return;
 	}
-
-	WaitQueue* mutexWaitList = NULL;
-	// point to the current mutex
-
-	GetLock(&lock, tid+1);
-
-	WaitQueueIterator foundQueueItr = waitQueueMap->find(lockAddr);
-	if(foundQueueItr != waitQueueMap->end())
-	{
-		mutexWaitList = foundQueueItr->second;
-	}
-
-	if (mutexWaitList) 
-	{
-		mutexWaitList->push_back(tid);
-	}
-	else
-	{
-		mutexWaitList = new std::list<UINT32>;
-		mutexWaitList->push_back(tid);
-		(*waitQueueMap)[lockAddr] = mutexWaitList;
-	}
-
-	ReleaseLock(&lock);
 }
 
 static void updateVectorClock(UINT32 myThreadId, VectorClock& myClock, VectorClock& otherClock)
@@ -183,15 +191,14 @@ static void updateVectorClock(UINT32 myThreadId, VectorClock& myClock, VectorClo
 VOID AfterLock (THREADID tid)
 {
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	ADDRINT lockAddr = tls->lockAddr;
 
-	if(tls->lockAddr > MUTEX_POINTER_LIMIT)
+	if(lockAddr > MUTEX_POINTER_LIMIT)
 	{
 		return;
 	}
 
-	WaitQueue* mutexWaitList = NULL;
 	FILE* out   = tls->out;
-	ADDRINT lockAddr = tls->lockAddr;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -203,6 +210,7 @@ VOID AfterLock (THREADID tid)
 
 	GetLock(&lock, tid+1);
 
+	printSignatures();
 	// add signature to the rdm
 	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	fprintf(out, "--- MUTEX LOCK ---\n");
@@ -211,28 +219,20 @@ VOID AfterLock (THREADID tid)
 	(*vectorClock)[tid]++;
 
 	// get the signalling thread and update my timestamp
-	SignalThreadIterator itr = signalledThreadMap->find(lockAddr);
-	if(itr != signalledThreadMap->end())
+	UnlockThreadIterator itr = unlockedThreadMap->find(lockAddr);
+	if(itr != unlockedThreadMap->end())
 	{
-		SignalThreadInfo signalThreadInfo = itr->second;
-		if (signalThreadInfo.tid != NO_ID) 
+		ThreadInfo threadInfo = itr->second;
+		if (threadInfo.tid != NO_ID) 
 		{
-			updateVectorClock(tid, *vectorClock, signalThreadInfo.vectorClock);
+			updateVectorClock(tid, *vectorClock, threadInfo.vectorClock);
 		}
 
 		// remove the notify signal
-		SignalThreadIterator stiItr = signalledThreadMap->find(lockAddr);
+		UnlockThreadIterator stiItr = unlockedThreadMap->find(lockAddr);
 		stiItr->second.tid = NO_ID;
 	}
 
-	// remove myself from the waiting queue
-	WaitQueueIterator foundQueueItr = waitQueueMap->find(lockAddr);
-	if(foundQueueItr != waitQueueMap->end() && mutexWaitList)
-	{
-		mutexWaitList = foundQueueItr->second;
-		mutexWaitList->remove(tid);
-	}
-	printSignatures();
 
 	ReleaseLock(&lock);
 
@@ -260,26 +260,247 @@ VOID BeforeUnlock (ADDRINT lockAddr, THREADID tid)
 
 	GetLock(&lock, tid+1);
 
+	printSignatures();
 	// add current signature to the rdm
 	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	fprintf(out, "--- MUTEX UNLOCK ---\n");
 
 	// increment timestamp
 	(*vectorClock)[tid]++;
-	// update the signalled map with my vector clock
-	(*signalledThreadMap)[lockAddr].update(tid, *vectorClock);
+	// update the unlocked map with my vector clock
+	(*unlockedThreadMap)[lockAddr].update(tid, *vectorClock);
 
-	printSignatures();
 	ReleaseLock(&lock);
 
 	readFilter->clear();
 	writeFilter->clear();
 }
 
+VOID BeforeCondWait(ADDRINT condVarAddr,ADDRINT lockAddr, THREADID tid)
+{
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	//WaitQueue* waitQueue = NULL;
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
+
+	tls->lockAddr = lockAddr;
+	tls->condVarAddr = condVarAddr;
+
+	if(lockAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
+
+#ifdef DEBUG_MODE
+	printf("Thread %d began waiting on condition variable[%lX] with lock[%lX].\n", tid, condVarAddr, lockAddr);
+	fflush(stdout);
+#endif
+
+	GetLock(&lock, tid+1);
+
+	printSignatures();
+	// add current signature to the rdm
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- CONDITION WAIT ---\n");
+
+	// increment timestamp
+	(*vectorClock)[tid]++;
+	// update the unlocked map with my vector clock
+	(*unlockedThreadMap)[lockAddr].update(tid, *vectorClock);
+
+
+	/*WaitQueueIterator foundQueueItr = waitQueueMap->find(condVarAddr);
+	if(foundQueueItr != waitQueueMap->end())
+	{
+		waitQueue = foundQueueItr->second;
+	}
+
+	if (waitQueue) 
+	{
+		waitQueue->push_back(tid);
+	}
+	else
+	{
+		waitQueue = new std::list<UINT32>;
+		waitQueue->push_back(tid);
+		(*waitQueueMap)[condVarAddr] = waitQueue;
+	}*/
+
+	ReleaseLock(&lock);
+
+	readFilter->clear();
+	writeFilter->clear();
+}
+
+VOID AfterCondWait(THREADID tid)
+{
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	ADDRINT lockAddr = tls->lockAddr;
+	ADDRINT condVarAddr = tls->condVarAddr;
+
+	if(lockAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
+
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
+
+#ifdef DEBUG_MODE
+	printf("Thread %d finished waiting on condition variable[%lX] with lock[%lX].\n", tid, condVarAddr, lockAddr);
+	fflush(stdout);
+#endif
+
+	GetLock(&lock, tid+1);
+
+	//printSignatures();
+	// add signature to the rdm
+	//rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- COND WAKE UP ---\n");
+
+	// increment timestamp
+	//(*vectorClock)[tid]++;
+
+	// get the signalling thread and update my timestamp
+	NotifyThreadIterator itr = notifiedThreadMap->find(condVarAddr);
+	if(itr != unlockedThreadMap->end())
+	{
+		ThreadInfo threadInfo = itr->second;
+
+		if (threadInfo.tid != NO_ID)
+		{
+			updateVectorClock(tid, *vectorClock, threadInfo.vectorClock);
+			threadInfo.tid = NO_ID;
+		}
+	}
+
+	/*// remove myself from the waiting queue
+	WaitQueueIterator foundQueueItr = waitQueueMap->find(condVarAddr);
+	if(foundQueueItr != waitQueueMap->end())
+	{
+		WaitQueue* waitQueue = foundQueueItr->second;
+		waitQueue->remove(tid);
+	}*/
+
+
+	ReleaseLock(&lock);
+
+	readFilter->clear();
+	writeFilter->clear();
+}
+
+VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
+VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
+{
+	if(condVarAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
+
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
+
+#ifdef DEBUG_MODE
+	printf("Thread %d signalled a condition variable[%lX].\n", tid, condVarAddr);
+	fflush(stdout);
+#endif
+
+	GetLock(&lock, tid+1);
+
+	printSignatures();
+	// add current signature to the rdm
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- SIGNAL ---\n");
+
+	// increment timestamp
+	(*vectorClock)[tid]++;
+
+	(*notifiedThreadMap)[condVarAddr].update(tid, *vectorClock);
+
+	ReleaseLock(&lock);
+
+	readFilter->clear();
+	writeFilter->clear();
+}
+
+VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID tid)
+{
+	if(condVarAddr > MUTEX_POINTER_LIMIT)
+	{
+		return;
+	}
+
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	FILE* out   = tls->out;
+	VectorClock* vectorClock = tls->vectorClock;
+	Bloom* readFilter = tls->readBloomFilter;
+	Bloom* writeFilter = tls->writeBloomFilter;
+
+#ifdef DEBUG_MODE
+	printf("Thread %d signalled a condition variable[%lX].\n", tid, condVarAddr);
+	fflush(stdout);
+#endif
+
+	GetLock(&lock, tid+1);
+
+	printSignatures();
+	// add current signature to the rdm
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	fprintf(out, "--- SIGNAL ---\n");
+
+	// increment timestamp
+	(*vectorClock)[tid]++;
+
+	(*notifiedThreadMap)[condVarAddr].update(tid, *vectorClock);
+
+	ReleaseLock(&lock);
+
+	readFilter->clear();
+	writeFilter->clear();
+}
+
+VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
+{
+
+}
+
 // This routine is executed for each image.
 VOID ImageLoad (IMG img, VOID *)
 {
-	RTN rtn = RTN_FindByName(img, "pthread_mutex_lock");
+	RTN rtn = RTN_FindByName(img, "INSTRUMENT_OFF");
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)TurnInstrumentationOff, IARG_THREAD_ID, IARG_END);
+		RTN_Close(rtn);
+	}
+
+	rtn = RTN_FindByName(img, "INSTRUMENT_ON");
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR)TurnInstrumentationOn, IARG_THREAD_ID, IARG_END);
+		RTN_Close(rtn);
+	}
+
+	/* MUTEX LOCK / UNLOCK */
+	rtn = RTN_FindByName(img, "pthread_mutex_lock");
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
@@ -301,76 +522,40 @@ VOID ImageLoad (IMG img, VOID *)
 		RTN_Close(rtn);
 	}
 
-	rtn = RTN_FindByName(img, "INSTRUMENT_OFF");
+	/* WAIT / NOTIFY */
+
+	rtn = RTN_FindByName(img, "pthread_cond_wait");
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
-		RTN_InsertCall(rtn, 
-				IPOINT_BEFORE, 
-				(AFUNPTR)TurnInstrumentationOff, 
-				IARG_THREAD_ID,
-				IARG_END);
+		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondWait),
+				IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				IARG_THREAD_ID, IARG_END);
+		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterCondWait),
+				IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
-
-	rtn = RTN_FindByName(img, "INSTRUMENT_ON");
+	rtn = RTN_FindByName(img, "pthread_cond_signal");
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
-		RTN_InsertCall(rtn, 
-				IPOINT_BEFORE, 
-				(AFUNPTR)TurnInstrumentationOn, 
-				IARG_THREAD_ID,
-				IARG_END);
+		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondSignal),
+				IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				IARG_THREAD_ID, IARG_END);
+		RTN_Close(rtn);
+	}
+
+	rtn = RTN_FindByName(img, "pthread_cond_broadcast");
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondBroadcast),
+				IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 }
-
-VOID BeforePthreadCreate(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID BeforePthreadJoin(ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID BeforeCondWait(ADDRINT condVarAddr,ADDRINT lockAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID AfterCondWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
-VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id ,char* imageName, ADDRINT stackPtr)
-{
-
-}
-
 
 #endif

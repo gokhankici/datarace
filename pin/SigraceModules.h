@@ -23,20 +23,23 @@ typedef std::list<UINT32> WaitQueue;
 typedef std::map< ADDRINT, WaitQueue* > WaitQueueMap;
 typedef WaitQueueMap::iterator WaitQueueIterator;
 
-class SignalThreadInfo 
+typedef map< unsigned long int, UINT32> PthreadTidMap;
+typedef PthreadTidMap::iterator PthreadTidMapItr;
+
+class ThreadInfo 
 {
 	public:
 		UINT32 tid;
 		VectorClock vectorClock;
 
-		SignalThreadInfo() : tid(NO_ID) {}
+		ThreadInfo() : tid(NO_ID) {}
 
-		SignalThreadInfo (UINT32 tid, const VectorClock& vc) :
+		ThreadInfo (UINT32 tid, const VectorClock& vc) :
 			tid(tid), vectorClock(vc) {}
 
-		SignalThreadInfo& operator= (const SignalThreadInfo& other)
+		ThreadInfo& operator= (const ThreadInfo& other)
 		{
-			SignalThreadInfo temp (other);
+			ThreadInfo temp (other);
 			tid = other.tid;
 			vectorClock = other.vectorClock;
 
@@ -49,8 +52,12 @@ class SignalThreadInfo
 			this->vectorClock = vc;
 		}
 };
-typedef std::map< long, SignalThreadInfo > SignalThreadMap;
-typedef SignalThreadMap::iterator SignalThreadIterator;
+typedef std::map< ADDRINT, ThreadInfo > UnlockThreadMap;
+typedef UnlockThreadMap::iterator UnlockThreadIterator;
+
+//typedef std::map< ADDRINT, list<ThreadInfo*>* > NotifyThreadMap;
+typedef std::map< ADDRINT, ThreadInfo > NotifyThreadMap;
+typedef NotifyThreadMap::iterator NotifyThreadIterator;
 
 /*
  * IMPLEMENTATION OF THREAD SYNCHRONIZATION SIGNATURE
