@@ -5,8 +5,6 @@ MARKDOWN = /usr/bin/markdown
 SRCS = SMPCache.cpp MultiCacheSim.cpp CacheCore.cpp Snippets.cpp nanassert.cpp
 FACSRCS = MSI_SMPCache.cpp MESI_SMPCache.cpp
 
-PIN_HOME=/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/
-
 #BLDTYPE=
 BLDTYPE=pin
 
