@@ -14,32 +14,41 @@
 
 typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
-class Bloom 
+class Bloom
 {
-	public:
-		Bloom(int size, int nfuncs, ...);
-		Bloom();
-		const Bloom& operator=(const Bloom& bloom);
-		Bloom(const Bloom& bloom);
-		~Bloom();
+public:
+	Bloom(int size, int nfuncs, ...);
+	Bloom();
+	const Bloom& operator=(const Bloom& bloom);
+	Bloom(const Bloom& bloom);
+	~Bloom();
 
-		void add(const unsigned char *s);
-		bool check(const unsigned char *s);
-		bool hasInCommon(const Bloom& bloom);
-		void clear();
+	void add(const unsigned char *s);
+	bool check(const unsigned char *s);
+	bool hasInCommon(const Bloom& bloom);
+	void clear();
 
-		const unsigned char* getFilter() { return filter; }
-		int getFilterSize(){ return filterSize; }
-		int getFilterSizeInBytes(){ return (filterSize+7)/8; }
+	const unsigned char* getFilter()
+	{
+		return filter;
+	}
+	int getFilterSize()
+	{
+		return filterSize;
+	}
+	int getFilterSizeInBytes()
+	{
+		return (filterSize + 7) / 8;
+	}
 
-	private:
-		int filterSize;
-		unsigned char *filter;
-		int nfuncs;
-		hashfunc_t *funcs;
+private:
+	int filterSize;
+	unsigned char *filter;
+	int nfuncs;
+	hashfunc_t *funcs;
 
 #ifdef SET_OVERRIDE
-		std::set<ADDRINT> locations;
+	std::set<ADDRINT> locations;
 #endif
 };
 

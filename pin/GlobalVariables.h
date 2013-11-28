@@ -18,33 +18,34 @@ extern TLS_KEY tlsKey;
 
 class ThreadLocalStorage
 {
-	public:
-		FILE* out;
-		VectorClock* vectorClock;
-		Bloom* readBloomFilter;
-		Bloom* writeBloomFilter;
-		ADDRINT lockAddr;
-		ADDRINT condVarAddr;
-		//pthread_t* createdThread;
-		//pthread_t joinedThread;
+public:
+	FILE* out;
+	VectorClock* vectorClock;
+	Bloom* readBloomFilter;
+	Bloom* writeBloomFilter;
+	ADDRINT lockAddr;
+	ADDRINT condVarAddr;
+	//pthread_t* createdThread;
+	//pthread_t joinedThread;
 
-		ThreadLocalStorage()
-		{
-			vectorClock = NULL;
-			readBloomFilter = NULL;
-			writeBloomFilter = NULL;
-			lockAddr = 0;
-			condVarAddr = 0;
-			//createdThread = NULL;
-			//joinedThread = NULL;
-		}
+	ThreadLocalStorage()
+	{
+		out = NULL;
+		vectorClock = NULL;
+		readBloomFilter = NULL;
+		writeBloomFilter = NULL;
+		lockAddr = 0;
+		condVarAddr = 0;
+		//createdThread = NULL;
+		//joinedThread = NULL;
+	}
 
-		~ThreadLocalStorage()
-		{
-			delete vectorClock;
-			delete readBloomFilter;
-			delete writeBloomFilter;
-		}
+	~ThreadLocalStorage()
+	{
+		delete vectorClock;
+		delete readBloomFilter;
+		delete writeBloomFilter;
+	}
 };
 // >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
 

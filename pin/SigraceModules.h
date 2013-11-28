@@ -20,43 +20,48 @@ typedef vector<UINT32> VectorClock;
  * IMPLEMENTATION OF WAITING QUEUE
  */
 typedef std::list<UINT32> WaitQueue;
-typedef std::map< ADDRINT, WaitQueue* > WaitQueueMap;
+typedef std::map<ADDRINT, WaitQueue*> WaitQueueMap;
 typedef WaitQueueMap::iterator WaitQueueIterator;
 
-typedef map< unsigned long int, UINT32> PthreadTidMap;
+typedef map<unsigned long int, UINT32> PthreadTidMap;
 typedef PthreadTidMap::iterator PthreadTidMapItr;
 
-class ThreadInfo 
+class ThreadInfo
 {
-	public:
-		UINT32 tid;
-		VectorClock vectorClock;
+public:
+	UINT32 tid;
+	VectorClock vectorClock;
 
-		ThreadInfo() : tid(NO_ID) {}
+	ThreadInfo() :
+			tid(NO_ID )
+	{
+	}
 
-		ThreadInfo (UINT32 tid, const VectorClock& vc) :
-			tid(tid), vectorClock(vc) {}
+	ThreadInfo(UINT32 tid, const VectorClock& vc) :
+			tid(tid), vectorClock(vc)
+	{
+	}
 
-		ThreadInfo& operator= (const ThreadInfo& other)
-		{
-			ThreadInfo temp (other);
-			tid = other.tid;
-			vectorClock = other.vectorClock;
+	ThreadInfo& operator=(const ThreadInfo& other)
+	{
+		ThreadInfo temp(other);
+		tid = other.tid;
+		vectorClock = other.vectorClock;
 
-			return *this;
-		}
+		return *this;
+	}
 
-		void update(UINT32 tid, const VectorClock& vc)
-		{
-			this->tid    = tid;
-			this->vectorClock = vc;
-		}
+	void update(UINT32 tid, const VectorClock& vc)
+	{
+		this->tid = tid;
+		this->vectorClock = vc;
+	}
 };
-typedef std::map< ADDRINT, ThreadInfo > UnlockThreadMap;
+typedef std::map<ADDRINT, ThreadInfo> UnlockThreadMap;
 typedef UnlockThreadMap::iterator UnlockThreadIterator;
 
 //typedef std::map< ADDRINT, list<ThreadInfo*>* > NotifyThreadMap;
-typedef std::map< ADDRINT, ThreadInfo > NotifyThreadMap;
+typedef std::map<ADDRINT, ThreadInfo> NotifyThreadMap;
 typedef NotifyThreadMap::iterator NotifyThreadIterator;
 
 /*
@@ -64,30 +69,32 @@ typedef NotifyThreadMap::iterator NotifyThreadIterator;
  */
 class SigRaceData
 {
-	public:
-		SigRaceData(int tid, VectorClock& ts, Bloom& r, Bloom& w)
-			: tid(tid), ts(ts), r(r), w(w) {}
+public:
+	SigRaceData(int tid, VectorClock& ts, Bloom& r, Bloom& w) :
+			tid(tid), ts(ts), r(r), w(w)
+	{
+	}
 
-		bool operator<(const SigRaceData& rhs )
+	bool operator<(const SigRaceData& rhs)
+	{
+		if (tid == rhs.tid)
 		{
-			if (tid == rhs.tid) 
-			{
-				return ts[tid] < rhs.ts[rhs.tid];
-			}
-
-			UINT32 l_l = ts[tid];
-			UINT32 l_r = ts[rhs.tid];
-			UINT32 r_r = rhs.ts[rhs.tid];
-			UINT32 r_l = rhs.ts[tid];
-
-			// both threads' values are lower in the lhs thread
-			return l_l < r_l && l_r < r_r;
+			return ts[tid] < rhs.ts[rhs.tid];
 		}
 
-		UINT32 tid;
-		VectorClock ts;
-		Bloom r;
-		Bloom w;
+		UINT32 l_l = ts[tid];
+		UINT32 l_r = ts[rhs.tid];
+		UINT32 r_r = rhs.ts[rhs.tid];
+		UINT32 r_l = rhs.ts[tid];
+
+		// both threads' values are lower in the lhs thread
+		return l_l < r_l && l_r < r_r;
+	}
+
+	UINT32 tid;
+	VectorClock ts;
+	Bloom r;
+	Bloom w;
 };
 
 /*
@@ -96,87 +103,95 @@ class SigRaceData
 typedef std::list<SigRaceData*> BlockHistoryQueue;
 class RaceDetectionModule
 {
-	public:
-		RaceDetectionModule() : threadCount(0) { }
-		~RaceDetectionModule()
+public:
+	RaceDetectionModule() :
+			threadCount(0)
+	{
+	}
+	~RaceDetectionModule()
+	{
+		while (!blockHistoryQueues.empty())
 		{
-			while(!blockHistoryQueues.empty())
+			BlockHistoryQueue* queue = blockHistoryQueues.back();
+			blockHistoryQueues.pop_back();
+			while (!queue->empty())
 			{
-				BlockHistoryQueue* queue = blockHistoryQueues.back();
-				blockHistoryQueues.pop_back();
-				while(!queue->empty()) 
-				{
-					delete queue->front();
-					queue->pop_front();
-				}
-				delete queue;
+				delete queue->front();
+				queue->pop_front();
 			}
+			delete queue;
+		}
+	}
+
+	void addSignature(SigRaceData* sigRaceData)
+	{
+		// add it to the queue
+		BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
+		queue->push_front(sigRaceData);
+
+		if (queue->size() > BLOCK_HISTORY_QUEUE_SIZE)
+		{
+			delete queue->back();
+			queue->pop_back();
 		}
 
-		void addSignature(SigRaceData* sigRaceData)
+		// check it with other threads' values
+		for (UINT32 queueId = 0; queueId < blockHistoryQueues.size(); queueId++)
 		{
-			// add it to the queue
-			BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
-			queue->push_front(sigRaceData);
-
-			if (queue->size() > BLOCK_HISTORY_QUEUE_SIZE) 
+			if (queueId == sigRaceData->tid)
 			{
-				delete queue->back();
-				queue->pop_back();
+				continue;
 			}
-
-			// check it with other threads' values
-			for (UINT32 queueId = 0; queueId < blockHistoryQueues.size(); queueId++) 
+			queue = blockHistoryQueues[queueId];
+			BlockHistoryQueue::iterator itr;
+			SigRaceData* other;
+			for (itr = queue->begin(); itr != queue->end(); itr++)
 			{
-				if(queueId == sigRaceData->tid)
+				other = *itr;
+				// rest is already HB this one
+				if (*other < *sigRaceData)
 				{
-					continue;
+					break;
 				}
-				queue = blockHistoryQueues[queueId];
-				BlockHistoryQueue::iterator itr;
-				SigRaceData* other;
-				for (itr = queue->begin(); itr != queue->end(); itr++)
-				{
-					other = *itr;
-					// rest is already HB this one
-					if (*other < *sigRaceData)
-					{
-						break;
-					}
 
-					if (sigRaceData->r.hasInCommon(other->w)) 
-					{
-						fprintf(stderr, "THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
-						fflush(stderr);
-						goto OUTER_FOR;
-					}
-					else if (sigRaceData->w.hasInCommon(other->r)) 
-					{
-						fprintf(stderr, "THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
-						fflush(stderr);
-						goto OUTER_FOR;
-					}
-					else if (sigRaceData->w.hasInCommon(other->w)) 
-					{
-						fprintf(stderr, "THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n", sigRaceData->tid, other->tid);
-						fflush(stderr);
-						goto OUTER_FOR;
-					}
+				if (sigRaceData->r.hasInCommon(other->w))
+				{
+					fprintf(stderr,
+							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
+							sigRaceData->tid, other->tid);
+					fflush(stderr);
+					goto OUTER_FOR;
+				}
+				else if (sigRaceData->w.hasInCommon(other->r))
+				{
+					fprintf(stderr,
+							"THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
+							sigRaceData->tid, other->tid);
+					fflush(stderr);
+					goto OUTER_FOR;
+				}
+				else if (sigRaceData->w.hasInCommon(other->w))
+				{
+					fprintf(stderr,
+							"THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
+							sigRaceData->tid, other->tid);
+					fflush(stderr);
+					goto OUTER_FOR;
 				}
 			}
-			OUTER_FOR:
-			return;
 		}
+		OUTER_FOR: return;
+	}
 
-		void addProcessor()
-		{
-			threadCount++;
-			blockHistoryQueues.push_back(new BlockHistoryQueue);
-		}
+	void addProcessor()
+	{
+		threadCount++;
+		blockHistoryQueues.push_back(new BlockHistoryQueue);
+	}
 
-	private:
-		std::vector< BlockHistoryQueue* > blockHistoryQueues;
-		int threadCount;
+private:
+	std::vector<BlockHistoryQueue*> blockHistoryQueues;
+	int threadCount;
 };
 
 #endif

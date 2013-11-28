@@ -19,34 +19,36 @@ static unsigned int defaultHashFunction(const unsigned char * key)
 
 Bloom::Bloom()
 {
-	int size   = DEFAULT_BLOOM_FILTER_SIZE;
+	int size = DEFAULT_BLOOM_FILTER_SIZE;
 	int nfuncs = 1;
-	
-	filter = (unsigned char *) calloc((size+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
-	funcs  = (hashfunc_t*) malloc(nfuncs*sizeof(hashfunc_t));
+
+	filter = (unsigned char *) calloc((size + CHAR_BIT - 1) / CHAR_BIT,
+			sizeof(char));
+	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
 	funcs[0] = defaultHashFunction;
 
 	this->nfuncs = nfuncs;
-	this->filterSize  = size;
+	this->filterSize = size;
 }
 
 Bloom::Bloom(int size, int nfuncs, ...)
 {
 	va_list l;
-	
-	filter = (unsigned char *) calloc((size+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
-	funcs  = (hashfunc_t*) malloc(nfuncs*sizeof(hashfunc_t));
+
+	filter = (unsigned char *) calloc((size + CHAR_BIT - 1) / CHAR_BIT,
+			sizeof(char));
+	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
 	va_start(l, nfuncs);
-	for(int n=0; n < nfuncs; ++n) 
+	for (int n = 0; n < nfuncs; ++n)
 	{
-		funcs[n]=va_arg(l, hashfunc_t);
+		funcs[n] = va_arg(l, hashfunc_t);
 	}
 	va_end(l);
 
 	this->nfuncs = nfuncs;
-	this->filterSize  = size;
+	this->filterSize = size;
 }
 
 Bloom::~Bloom()
@@ -58,7 +60,7 @@ Bloom::~Bloom()
 void Bloom::add(const unsigned char *s)
 {
 #ifndef SET_OVERRIDE
-	for(int n=0; n < nfuncs; ++n) 
+	for(int n=0; n < nfuncs; ++n)
 	{
 		SETBIT(filter, funcs[n](s)%filterSize);
 	}
@@ -69,14 +71,15 @@ void Bloom::add(const unsigned char *s)
 
 const Bloom& Bloom::operator=(const Bloom& bloom)
 {
-	nfuncs      = bloom.nfuncs;
-	filterSize  = bloom.filterSize;
+	nfuncs = bloom.nfuncs;
+	filterSize = bloom.filterSize;
 
-	filter = (unsigned char *) calloc((filterSize+CHAR_BIT-1)/CHAR_BIT, sizeof(char));
-	funcs  = (hashfunc_t*) malloc(nfuncs*sizeof(hashfunc_t));
+	filter = (unsigned char *) calloc((filterSize + CHAR_BIT - 1) / CHAR_BIT,
+			sizeof(char));
+	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
-	memcpy(filter, bloom.filter, (filterSize+CHAR_BIT-1)/CHAR_BIT);
-	memcpy(funcs, bloom.funcs,nfuncs*sizeof(hashfunc_t));
+	memcpy(filter, bloom.filter, (filterSize + CHAR_BIT - 1) / CHAR_BIT);
+	memcpy(funcs, bloom.funcs, nfuncs * sizeof(hashfunc_t));
 
 #ifdef SET_OVERRIDE
 	locations = bloom.locations;
@@ -97,7 +100,7 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 	int byteCount = getFilterSizeInBytes();
 	int same = 0;
 
-	for(int n = 0; n < byteCount; ++n) 
+	for(int n = 0; n < byteCount; ++n)
 	{
 		if(filter[n] & bloom.filter[n])
 		{
@@ -116,20 +119,22 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 			bloom.locations.begin(), bloom.locations.end(),
 			std::back_inserter(v_intersection));
 
-	if(v_intersection.size())
+	if (v_intersection.size())
 	{
 		cout << "Filter 1" << endl;
-		for (std::set<ADDRINT>::iterator it=locations.begin(); it!=locations.end(); ++it)
+		for (std::set<ADDRINT>::iterator it = locations.begin();
+				it != locations.end(); ++it)
 			printf("%lX, ", *it);
 		printf("\n");
 
 		cout << "Filter 2" << endl;
-		for (std::set<ADDRINT>::iterator it=bloom.locations.begin(); it!=bloom.locations.end(); ++it)
+		for (std::set<ADDRINT>::iterator it = bloom.locations.begin();
+				it != bloom.locations.end(); ++it)
 			printf("%lX, ", *it);
 		printf("\n");
 
 		printf("Same elements: \n");
-		for (unsigned int i = 0; i < v_intersection.size(); i++) 
+		for (unsigned int i = 0; i < v_intersection.size(); i++)
 		{
 			printf("%lX, ", v_intersection[i]);
 		}
@@ -145,7 +150,7 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 bool Bloom::check(const unsigned char *s)
 {
 #ifndef SET_OVERRIDE
-	for(int n=0; n < nfuncs; ++n) 
+	for(int n=0; n < nfuncs; ++n)
 	{
 		if(!(GETBIT(filter, funcs[n](s)%filterSize)))
 		{
