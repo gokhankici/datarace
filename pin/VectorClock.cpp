@@ -45,7 +45,10 @@ VectorClock::VectorClock(VectorClock& vectorClock, int processId)
 
 VectorClock::VectorClock(const VectorClock& copyVC)
 {
-	*this = copyVC;
+	threadId = copyVC.threadId;
+	size_t byteCount = sizeof(int) * totalProcessCount;
+	v = (UINT32*) malloc(byteCount);
+	memcpy(v, copyVC.v, byteCount);
 }
 
 const VectorClock& VectorClock::operator=(const VectorClock& vcRight)
@@ -84,6 +87,7 @@ void VectorClock::receiveAction(VectorClock& vectorClockReceived)
 	UINT32 *receivedClockValues = vectorClockReceived.getValues();
 	for (int i = 0; i < totalProcessCount; ++i)
 		v[i] = (v[i] > receivedClockValues[i]) ? v[i] : receivedClockValues[i];
+
 }
 
 void VectorClock::receiveActionFromSpecialPoint(

@@ -18,6 +18,9 @@ extern RaceDetectionModule rdm;
 extern PIN_LOCK threadIdMapLock;
 extern ThreadIdMap threadIdMap;
 
+extern PIN_LOCK barrierLock;
+extern BarrierQueueMap barrierWaitMap;
+
 extern KNOB<string> KnobOutputFile;
 extern KNOB<bool> KnobStopOnError;
 extern KNOB<bool> KnobPrintOnError;

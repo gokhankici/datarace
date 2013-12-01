@@ -66,6 +66,9 @@ PIN_LOCK lock;
 UnlockThreadMap* unlockedThreadMap;
 NotifyThreadMap* notifiedThreadMap;
 
+PIN_LOCK barrierLock;
+BarrierQueueMap barrierWaitMap;
+
 PIN_LOCK threadIdMapLock;
 ThreadIdMap threadIdMap;
 
@@ -99,6 +102,7 @@ int main(INT32 argc, CHAR **argv)
 	InitLock(&mccLock);
 	InitLock(&lock);
 	InitLock(&threadIdMapLock);
+	InitLock(&barrierLock);
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;

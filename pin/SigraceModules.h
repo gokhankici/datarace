@@ -22,7 +22,6 @@
  */
 typedef std::list<UINT32> WaitQueue;
 typedef std::map<ADDRINT, WaitQueue*> WaitQueueMap;
-
 typedef WaitQueueMap::iterator WaitQueueIterator;
 
 typedef std::map<OS_THREAD_ID, THREADID> ThreadIdMap;
@@ -65,6 +64,11 @@ typedef UnlockThreadMap::iterator UnlockThreadIterator;
 //typedef std::map< ADDRINT, list<ThreadInfo*>* > NotifyThreadMap;
 typedef std::map<ADDRINT, ThreadInfo> NotifyThreadMap;
 typedef NotifyThreadMap::iterator NotifyThreadIterator;
+
+typedef std::list<ThreadInfo*> BarrierQueue;
+typedef BarrierQueue::iterator BarrierQueueIterator;
+typedef std::map<ADDRINT, BarrierQueue*> BarrierQueueMap;
+typedef BarrierQueueMap::iterator BarrierQueueMapIterator;
 
 /*
  * IMPLEMENTATION OF THREAD SYNCHRONIZATION SIGNATURE
