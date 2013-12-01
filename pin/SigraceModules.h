@@ -10,21 +10,23 @@
 #include <map>
 
 #include "Bloom.h"
+#include "VectorClock.h"
 
 #define NO_ID ((UINT32) 0xFFFFFFFF)
-#define BLOCK_HISTORY_QUEUE_SIZE 10
+#define BLOCK_HISTORY_QUEUE_SIZE 16
 
-typedef vector<UINT32> VectorClock;
+//typedef vector<UINT32> VectorClock;
 
 /*
  * IMPLEMENTATION OF WAITING QUEUE
  */
 typedef std::list<UINT32> WaitQueue;
 typedef std::map<ADDRINT, WaitQueue*> WaitQueueMap;
+
 typedef WaitQueueMap::iterator WaitQueueIterator;
 
-typedef map<unsigned long int, UINT32> PthreadTidMap;
-typedef PthreadTidMap::iterator PthreadTidMapItr;
+typedef std::map<OS_THREAD_ID, THREADID> ThreadIdMap;
+typedef ThreadIdMap::iterator ThreadIdMapItr;
 
 class ThreadInfo
 {
@@ -77,18 +79,12 @@ public:
 
 	bool operator<(const SigRaceData& rhs)
 	{
-		if (tid == rhs.tid)
-		{
-			return ts[tid] < rhs.ts[rhs.tid];
-		}
+		return ts.happensBefore(rhs.ts);
+	}
 
-		UINT32 l_l = ts[tid];
-		UINT32 l_r = ts[rhs.tid];
-		UINT32 r_r = rhs.ts[rhs.tid];
-		UINT32 r_l = rhs.ts[tid];
-
-		// both threads' values are lower in the lhs thread
-		return l_l < r_l && l_r < r_r;
+	bool isDirty()
+	{
+		return !r.isEmpty() || !w.isEmpty();
 	}
 
 	UINT32 tid;
@@ -125,6 +121,11 @@ public:
 
 	void addSignature(SigRaceData* sigRaceData)
 	{
+		if (!sigRaceData->isDirty())
+		{
+			return;
+		}
+
 		// add it to the queue
 		BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
 		queue->push_front(sigRaceData);

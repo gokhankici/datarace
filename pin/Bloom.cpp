@@ -30,6 +30,7 @@ Bloom::Bloom()
 
 	this->nfuncs = nfuncs;
 	this->filterSize = size;
+	elementCount = 0;
 }
 
 Bloom::Bloom(int size, int nfuncs, ...)
@@ -49,6 +50,7 @@ Bloom::Bloom(int size, int nfuncs, ...)
 
 	this->nfuncs = nfuncs;
 	this->filterSize = size;
+	elementCount = 0;
 }
 
 Bloom::~Bloom()
@@ -67,12 +69,15 @@ void Bloom::add(const unsigned char *s)
 #else
 	locations.insert(*((ADDRINT*) s));
 #endif
+
+	elementCount++;
 }
 
 const Bloom& Bloom::operator=(const Bloom& bloom)
 {
 	nfuncs = bloom.nfuncs;
 	filterSize = bloom.filterSize;
+	elementCount = bloom.elementCount;
 
 	filter = (unsigned char *) calloc((filterSize + CHAR_BIT - 1) / CHAR_BIT,
 			sizeof(char));
@@ -166,8 +171,14 @@ bool Bloom::check(const unsigned char *s)
 void Bloom::clear()
 {
 	memset(filter, 0, getFilterSizeInBytes());
+	elementCount = 0;
 
 #ifdef SET_OVERRIDE
 	locations.clear();
 #endif
+}
+
+bool Bloom::isEmpty()
+{
+	return elementCount == 0;
 }

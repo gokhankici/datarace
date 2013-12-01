@@ -21,11 +21,14 @@ KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "lock_mt.out",
 
 KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool", "stopOnProtoBug",
 		"false",
-		"Stop the Simulation when a deviation is detected between the test protocol and the reference"); //default cache is verbose
+		//default cache is verbose
+		"Stop the Simulation when a deviation is detected between the test protocol "
+				"and the reference");
 
 KNOB<bool> KnobPrintOnError(KNOB_MODE_WRITEONCE, "pintool", "printOnProtoBug",
 		"false",
-		"Print a debugging message when a deviation is detected between the test protocol and the reference"); //default cache is verbose
+		"Print a debugging message when a deviation is detected between the test protocol "
+				"and the reference"); //default cache is verbose
 
 KNOB<bool> KnobConcise(KNOB_MODE_WRITEONCE, "pintool", "concise", "true",
 		"Print output concisely"); //default cache is verbose
@@ -47,7 +50,8 @@ KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos",
 		"Cache Coherence Protocol Modules To Simulate");
 
 KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
-		"/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/pin/MultiCacheSim-dist/MSI_SMPCache.so",
+		"/home/gokhan/Applications/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
+				"pin/MultiCacheSim-dist/MSI_SMPCache.so",
 		"Reference Protocol that is compared to test Protocols for Correctness");
 
 // <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
@@ -61,7 +65,9 @@ PIN_LOCK lock;
 //WaitQueueMap* waitQueueMap;
 UnlockThreadMap* unlockedThreadMap;
 NotifyThreadMap* notifiedThreadMap;
-PthreadTidMap tidMap;
+
+PIN_LOCK threadIdMapLock;
+ThreadIdMap threadIdMap;
 
 RaceDetectionModule rdm;
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -92,6 +98,7 @@ int main(INT32 argc, CHAR **argv)
 
 	InitLock(&mccLock);
 	InitLock(&lock);
+	InitLock(&threadIdMapLock);
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;

@@ -23,15 +23,15 @@ bool printOnError = false;
 
 unsigned long instrumentationStatus[MAX_NTHREADS];
 
-//VOID TurnInstrumentationOn(ADDRINT tid)
-//{
-//	instrumentationStatus[PIN_ThreadId()] = true;
-//}
-//
-//VOID TurnInstrumentationOff(ADDRINT tid)
-//{
-//	instrumentationStatus[PIN_ThreadId()] = false;
-//}
+VOID TurnInstrumentationOn(ADDRINT tid)
+{
+	instrumentationStatus[PIN_ThreadId()] = true;
+}
+
+VOID TurnInstrumentationOff(ADDRINT tid)
+{
+	instrumentationStatus[PIN_ThreadId()] = false;
+}
 
 BOOL isMemoryGlobal(ADDRINT effectiveAddr, ADDRINT stackPtr)
 {

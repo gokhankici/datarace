@@ -59,11 +59,11 @@ INT32 usage()
 
 
 VOID TurnInstrumentationOn(ADDRINT tid){
-  instrumentationStatus[PIN_ThreadId()] = true; 
+  instrumentationStatus[PIN_ThreadId()] = true;
 }
 
 VOID TurnInstrumentationOff(ADDRINT tid){
-  instrumentationStatus[PIN_ThreadId()] = false; 
+  instrumentationStatus[PIN_ThreadId()] = false;
 }
 
 

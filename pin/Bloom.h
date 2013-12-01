@@ -27,6 +27,7 @@ public:
 	bool check(const unsigned char *s);
 	bool hasInCommon(const Bloom& bloom);
 	void clear();
+	bool isEmpty();
 
 	const unsigned char* getFilter()
 	{
@@ -42,6 +43,7 @@ public:
 	}
 
 private:
+	int elementCount;
 	int filterSize;
 	unsigned char *filter;
 	int nfuncs;
