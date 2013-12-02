@@ -199,4 +199,65 @@ private:
 	int threadCount;
 };
 
+/*
+ * MEMORY AREA USED FOR HANDLING MALLOC/FREE ISSUES
+ */
+class MemoryArea
+{
+public:
+	THREADID tid;
+	ADDRINT from; // inclusive
+	ADDRINT to;   // exclusive
+
+	MemoryArea() :
+			tid(0), from(0), to(0)
+	{
+	}
+
+	MemoryArea(THREADID tid, ADDRINT from, ADDRINT to) :
+			tid(tid), from(from), to(to)
+	{
+	}
+
+	MemoryArea(const MemoryArea& rhs)
+	{
+		tid = rhs.tid;
+		from = rhs.from;
+		to = rhs.to;
+	}
+
+	bool operator<(const MemoryArea& rhs) const
+	{
+		return to <= rhs.from;
+	}
+
+	bool operator==(const MemoryArea& rhs) const
+	{
+		// only from is required when looking for equality ?
+		return from == rhs.from;
+	}
+
+	const MemoryArea& operator=(const MemoryArea& rhs)
+	{
+		tid = rhs.tid;
+		from = rhs.from;
+		to = rhs.to;
+		return *this;
+	}
+
+	bool overlaps(const MemoryArea& mem)
+	{
+		// not ( this is after mem || this is before mem )
+		return !(from >= mem.to || to <= mem.from);
+	}
+
+	ADDRINT size() const
+	{
+		return to - from;
+	}
+
+};
+typedef std::set<MemoryArea> MemorySet;
+typedef MemorySet::iterator MemorySetItr;
+
 #endif

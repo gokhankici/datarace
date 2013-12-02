@@ -7,8 +7,8 @@
 #include <string>
 #include <string.h>
 #include <dlfcn.h>
+#include <assert.h>
 
-#include "GlobalVariables.h"
 #include "MultiCacheSim_PinDriver.h"
 #include "Bloom.h"
 
@@ -208,4 +208,246 @@ BOOL termHandler(THREADID threadid, INT32 sig, CONTEXT *ctx, BOOL hasHndlr,
 		const EXCEPTION_INFO *pExceptInfo, VOID*v)
 {
 	return TRUE; //let the program's handler run too
+}
+
+/* ############################################################# */
+/* ############################################################# */
+/* ############################################################# */
+/* ############################################################# */
+/* ############################################################# */
+
+static ThreadLocalStorage* getTLS(THREADID tid)
+{
+	ThreadLocalStorage* tls =
+			static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	return tls;
+}
+
+/*
+ * Finds the first (smallest starting address) memory area that overlaps
+ * with the given area
+ */
+#pragma INLINE
+static MemorySetItr smallestOverlappingMemoryArea(const MemoryArea& area)
+{
+	MemorySetItr itr = memorySet.lower_bound(area);
+	return itr;
+}
+
+#pragma INLINE
+static const MemoryArea& findMemoryArea(ADDRINT from)
+{
+	MemoryArea area(0, from, 0);
+	MemorySetItr itr = memorySet.find(area);
+	return *itr;
+}
+
+//#pragma INLINE
+//static bool hasOverlappingArea(MemoryArea& area)
+//{
+//	MemorySetItr itr = memorySet.lower_bound(area);
+//	return itr != memorySet.end() && ((MemoryArea) *itr).overlaps(area);
+//}
+
+static VOID moveMemoryAddresses(ADDRINT startOfOldPlace,
+		ADDRINT startOfNewPlace, UINT32 size, THREADID tid)
+{
+	/*
+	 ADDRINT maxSize = (startOfOldPlace + size);
+	 ADDRINT newMemAddrTmp;
+	 variablesHashMap* tmpHashMap;
+	 MemoryAddr* tmpMemAddr = NULL;
+	 MemoryAddr* newTmpMemAddrObj = NULL;
+
+	 ADDRINT difference = 0;
+	 for (ADDRINT currentAddress = startOfOldPlace; currentAddress <= maxSize;
+	 ++currentAddress)
+	 {
+	 GetLock(
+	 &variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask], tid);
+	 tmpHashMap = allMemoryLocations.getVariableHashMap(currentAddress);
+	 if (tmpHashMap == NULL || (*tmpHashMap).count(currentAddress) == 0)
+	 {
+	 ReleaseLock (&variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask]);
+	 continue;
+	 }
+	 tmpMemAddr = (*tmpHashMap)[currentAddress];
+	 difference = currentAddress - startOfOldPlace;
+	 ReleaseLock (&variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask]);
+
+	 newMemAddrTmp = startOfNewPlace + difference;
+
+	 GetLock(
+	 &variablePinLocks[(newMemAddrTmp >> 3)
+	 & allMemoryLocations.bitMask], tid);
+	 tmpHashMap = allMemoryLocations.getVariableHashMap(newMemAddrTmp);
+	 if (tmpHashMap == NULL)
+	 {
+	 ReleaseLock(
+	 &variablePinLocks[(newMemAddrTmp >> 3)
+	 & allMemoryLocations.bitMask]);
+	 continue;
+	 }
+	 //cout << "moved:" << currentAddress << "  to:" << newMemAddrTmp << endl;
+	 newTmpMemAddrObj = new MemoryAddr(newMemAddrTmp, true); //yeni mem adresi olustur
+	 (*tmpHashMap)[newMemAddrTmp] = newTmpMemAddrObj;
+	 newTmpMemAddrObj->readerVectorClock = tmpMemAddr->readerVectorClock; //vector clocklari al
+	 newTmpMemAddrObj->writerVectorClock = tmpMemAddr->writerVectorClock;
+	 tmpMemAddr->readerVectorClock = NULL; //eskinin vectorClocklari null'a
+	 tmpMemAddr->writerVectorClock = NULL;
+	 ReleaseLock(
+	 &variablePinLocks[(newMemAddrTmp >> 3)
+	 & allMemoryLocations.bitMask]);
+
+	 GetLock(
+	 &variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask], tid);
+	 tmpHashMap = allMemoryLocations.getVariableHashMap(currentAddress);
+	 tmpHashMap->erase(currentAddress);
+	 delete tmpMemAddr;
+	 ReleaseLock(
+	 &variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask]);
+	 }
+	 */
+}
+
+static VOID freeMemoryAddress(ADDRINT memoryAddrFreeStarts,
+		ADDRINT maxMemoryAddrToBeFreed, THREADID threadid)
+{
+	/*
+	 variablesHashMap* tmpHashMap;
+	 for (ADDRINT currentAddress = memoryAddrFreeStarts;
+	 currentAddress <= maxMemoryAddrToBeFreed; ++currentAddress)
+	 {
+	 GetLock(
+	 &variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask], threadid);
+	 tmpHashMap = allMemoryLocations.getVariableHashMap(currentAddress);
+
+	 if (tmpHashMap == NULL || (*tmpHashMap).count(currentAddress) == 0)
+	 {
+	 ReleaseLock (&variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask]);
+	 continue;
+	 }
+
+	 delete (*tmpHashMap)[currentAddress]->writerVectorClock;
+	 delete (*tmpHashMap)[currentAddress]->readerVectorClock;
+
+	 (*tmpHashMap).erase(currentAddress);
+	 ReleaseLock (&variablePinLocks[(currentAddress >> 3)
+	 & allMemoryLocations.bitMask]);
+	 }
+	 */
+}
+
+VOID ReallocEnter(CHAR * name, ADDRINT previousAddress, ADDRINT newSize,
+		THREADID tid)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	tls->nextReallocAddr = previousAddress;
+	tls->nextReallocSize = newSize;
+}
+
+VOID ReallocAfter(ADDRINT mallocStartAddr, THREADID tid)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	ADDRINT previousAddress = tls->nextReallocAddr;
+	ADDRINT newSize = tls->nextReallocSize;
+
+	//if previous address is NULL, this is the same as malloc
+	if (previousAddress == 0)
+	{
+		tls->nextMallocSize = tls->nextReallocSize;
+		tls->nextReallocAddr = 0;
+		tls->nextReallocSize = 0;
+		MallocAfter(mallocStartAddr, tid);
+		return;
+	}
+
+	const MemoryArea& prevArea = findMemoryArea(mallocStartAddr);
+	MemoryArea newArea(tid, mallocStartAddr, mallocStartAddr + newSize);
+
+	ADDRINT prevSize = prevArea.to - prevArea.from;
+
+	// Realloc gives the same address as previos realloc(or malloc,calloc)
+	if (prevArea.from == mallocStartAddr)
+	{
+		//eger yeni yer daha kucuk ise, eskiden bizim olan aradaki yerleri free edelim
+		if (newSize < prevSize)
+		{
+			freeMemoryAddress(mallocStartAddr + newSize,
+					mallocStartAddr + prevSize, tid);
+		}
+	}
+	else
+	{
+		if (newSize < prevSize)
+		{
+			moveMemoryAddresses(previousAddress, mallocStartAddr, newSize, tid);
+			freeMemoryAddress(previousAddress + newSize,
+					previousAddress + prevSize, tid);
+		}
+		else
+		{
+			moveMemoryAddresses(previousAddress, mallocStartAddr, prevSize,
+					tid);
+			freeMemoryAddress(previousAddress, previousAddress + prevSize, tid);
+		}
+	}
+
+	GetLock(&memorySetLock, tid);
+	memorySet.insert(newArea);
+	memorySet.erase(prevArea);
+	ReleaseLock(&memorySetLock);
+}
+
+VOID CallocEnter(CHAR * name, ADDRINT nElements, ADDRINT sizeOfEachElement,
+		THREADID tid)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	tls->nextMallocSize = nElements * sizeOfEachElement;
+}
+
+VOID MallocEnter(CHAR * name, ADDRINT size, THREADID tid)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	tls->nextMallocSize = size;
+}
+
+VOID MallocAfter(ADDRINT mallocStartAddr, THREADID tid)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	ADDRINT mallocEndAddr = tls->nextMallocSize + mallocStartAddr;
+	tls->nextMallocSize = 0;
+
+	MemoryArea newArea(tid, mallocStartAddr, mallocEndAddr);
+
+	GetLock(&memorySetLock, tid);
+	MemorySetItr overlaps = smallestOverlappingMemoryArea(newArea);
+
+	if (overlaps != memorySet.end())
+	{
+		// has overlapping elements
+	}
+
+	ReleaseLock(&memorySetLock);
+}
+
+VOID FreeEnter(ADDRINT startAddress, THREADID threadid)
+{
+	GetLock(&memorySetLock, threadid);
+	const MemoryArea area = findMemoryArea(startAddress);
+	ADDRINT freeSize = area.size();
+	memorySet.erase(area);
+	ReleaseLock(&memorySetLock);
+
+	if (freeSize == 0)
+		return;
+
+	freeMemoryAddress(startAddress, area.to, threadid);
 }

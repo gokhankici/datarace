@@ -73,6 +73,10 @@ PIN_LOCK threadIdMapLock;
 ThreadIdMap threadIdMap;
 
 RaceDetectionModule rdm;
+
+PIN_LOCK memorySetLock;
+MemorySet mallocAreas; //map[memoryAddrStart] = ( malloced bytes size)
+
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 INT32 usage()
@@ -103,6 +107,7 @@ int main(INT32 argc, CHAR **argv)
 	InitLock(&lock);
 	InitLock(&threadIdMapLock);
 	InitLock(&barrierLock);
+	InitLock(&memorySetLock);
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;

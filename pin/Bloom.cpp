@@ -10,6 +10,7 @@
 #include "MurmurHash2.h"
 
 #define SETBIT(filter, n) (filter[n/CHAR_BIT] |= (1<<(n%CHAR_BIT)))
+#define UNSETBIT(filter, n) (filter[n/CHAR_BIT] &= ~(1<<(n%CHAR_BIT)))
 #define GETBIT(filter, n) (filter[n/CHAR_BIT] & (1<<(n%CHAR_BIT)))
 
 static unsigned int defaultHashFunction(const unsigned char * key)
@@ -71,6 +72,21 @@ void Bloom::add(const unsigned char *s)
 #endif
 
 	elementCount++;
+}
+
+void Bloom::remove(ADDRINT removedAddress)
+{
+#ifndef SET_OVERRIDE
+	for(int n=0; n < nfuncs; ++n)
+	{
+		UNSETBIT(filter, funcs[n](s)%filterSize);
+	}
+#else
+	locations.insert(removedAddress);
+#endif
+
+	// TODO: multiple elements could be removed from the filter but doesn't matter
+	elementCount--;
 }
 
 const Bloom& Bloom::operator=(const Bloom& bloom)
@@ -181,4 +197,16 @@ void Bloom::clear()
 bool Bloom::isEmpty()
 {
 	return elementCount == 0;
+}
+
+/**
+ * Clear the filter between these positions
+ */
+void Bloom::clear(ADDRINT startAddress, ADDRINT endAddress)
+{
+	ADDRINT address = startAddress;
+	for (; address < endAddress; address++)
+	{
+		remove(address);
+	}
 }

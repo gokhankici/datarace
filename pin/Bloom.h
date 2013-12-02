@@ -27,6 +27,8 @@ public:
 	bool check(const unsigned char *s);
 	bool hasInCommon(const Bloom& bloom);
 	void clear();
+	void remove(ADDRINT removedAddress);
+	void clear(ADDRINT startAddress, ADDRINT endAddress);
 	bool isEmpty();
 
 	const unsigned char* getFilter()

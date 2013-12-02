@@ -26,6 +26,10 @@ public:
 	ADDRINT lockAddr;
 	ADDRINT condVarAddr;
 	ADDRINT barrierAddr;
+
+	ADDRINT nextMallocSize;
+	ADDRINT nextReallocAddr;
+	ADDRINT nextReallocSize;
 	//pthread_t* createdThread;
 	//pthread_t joinedThread;
 
@@ -38,6 +42,10 @@ public:
 		lockAddr = 0;
 		condVarAddr = 0;
 		barrierAddr = 0;
+
+		nextMallocSize = 0;
+		nextReallocAddr = 0;
+		nextReallocSize = 0;
 		//createdThread = NULL;
 		//joinedThread = NULL;
 	}

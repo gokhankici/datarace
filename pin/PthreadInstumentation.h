@@ -33,10 +33,13 @@ extern KNOB<string> KnobProtocol;
 extern KNOB<string> KnobReference;
 
 VOID ImageLoad(IMG img, VOID *);
+
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v);
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
+
 VOID BeforeLock(ADDRINT lockAddr, THREADID tid);
 VOID AfterLock(THREADID tid);
+
 VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid);
 
 VOID BeforePthreadCreate(pthread_t* ptid, THREADID id);
