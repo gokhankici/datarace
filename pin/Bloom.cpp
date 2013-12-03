@@ -79,7 +79,7 @@ void Bloom::remove(ADDRINT removedAddress)
 #ifndef SET_OVERRIDE
 	for(int n=0; n < nfuncs; ++n)
 	{
-		UNSETBIT(filter, funcs[n](s)%filterSize);
+		UNSETBIT(filter, funcs[n](BLOOM_ADDR(removedAddress))%filterSize);
 	}
 #else
 	locations.insert(removedAddress);
@@ -209,4 +209,14 @@ void Bloom::clear(ADDRINT startAddress, ADDRINT endAddress)
 	{
 		remove(address);
 	}
+}
+
+void Bloom::print(FILE* out)
+{
+	int size = getFilterSizeInBytes();
+	for (int i = 0; i < size; ++i)
+	{
+		fprintf(out, "%02X", filter[i]);
+	}
+	fprintf(out, "\n");
 }

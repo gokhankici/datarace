@@ -130,6 +130,12 @@ public:
 			return;
 		}
 
+		// TODO remove here
+		// printf("READ of %d\n", sigRaceData->tid);
+		// sigRaceData->r.print(stdout);
+		// printf("WRITE of %d\n", sigRaceData->tid);
+		// sigRaceData->w.print(stdout);
+
 		// add it to the queue
 		BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
 		queue->push_front(sigRaceData);

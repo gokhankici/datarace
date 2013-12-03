@@ -7,7 +7,7 @@
 #include <vector>
 #include <set>
 
-#define DEFAULT_BLOOM_FILTER_SIZE 10240000
+#define DEFAULT_BLOOM_FILTER_SIZE 2048
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
 #define SET_OVERRIDE
@@ -30,6 +30,7 @@ public:
 	void remove(ADDRINT removedAddress);
 	void clear(ADDRINT startAddress, ADDRINT endAddress);
 	bool isEmpty();
+	void print(FILE* out);
 
 	const unsigned char* getFilter()
 	{

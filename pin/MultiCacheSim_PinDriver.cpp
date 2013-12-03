@@ -65,6 +65,7 @@ void Read(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 	addToReadFilter(tid, addr, stackPtr);
 
 	/* addition of MultiCacheSim coherency protocols */
+	/*
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->readLine(tid, inst, addr);
 	std::vector<MultiCacheSim *>::iterator i, e;
@@ -94,6 +95,7 @@ void Read(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 	}
 
 	ReleaseLock(&mccLock);
+	*/
 }
 
 VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
@@ -116,6 +118,7 @@ void Write(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 {
 	addToWriteFilter(tid, addr, stackPtr);
 
+	/*
 	GetLock(&mccLock, 1);
 	ReferenceProtocol->writeLine(tid, inst, addr);
 	std::vector<MultiCacheSim *>::iterator i, e;
@@ -146,6 +149,7 @@ void Write(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 		}
 	}
 	ReleaseLock(&mccLock);
+	*/
 }
 
 void processMemoryWriteInstruction(INS ins, const char* imageName)
@@ -168,15 +172,16 @@ void processMemoryReadInstruction(INS ins, const char* imageName)
 {
 	UINT32 memoryOperandCount = INS_MemoryOperandCount(ins);
 	for (UINT32 i = 0; i < memoryOperandCount; ++i)
+	{
 		if (INS_MemoryOperandIsRead(ins, i))
 		{
-
 			INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR) Read,
 					IARG_THREAD_ID, IARG_MEMORYOP_EA, i, IARG_REG_VALUE,
 					REG_STACK_PTR, //pass current stack ptr
 					IARG_PTR, imageName, IARG_INST_PTR, IARG_MEMORYWRITE_SIZE,
 					IARG_CALL_ORDER, CALL_ORDER_FIRST + 30, IARG_END);
 		}
+	}
 }
 
 VOID instrumentTrace(TRACE trace, VOID *v)
@@ -212,7 +217,7 @@ BOOL termHandler(THREADID threadid, INT32 sig, CONTEXT *ctx, BOOL hasHndlr,
 
 /* ############################################################# */
 /* ############################################################# */
-/* ############################################################# */
+/* ##################   MALLOC / FREE    ####################### */
 /* ############################################################# */
 /* ############################################################# */
 

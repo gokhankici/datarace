@@ -75,7 +75,7 @@ ThreadIdMap threadIdMap;
 RaceDetectionModule rdm;
 
 PIN_LOCK memorySetLock;
-MemorySet mallocAreas; //map[memoryAddrStart] = ( malloced bytes size)
+MemorySet memorySet;
 
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
