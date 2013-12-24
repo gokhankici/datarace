@@ -15,7 +15,7 @@
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define BLOCK_HISTORY_QUEUE_SIZE 16
 
-//typedef vector<UINT32> VectorClock;
+extern PIN_LOCK fileLock;
 
 /*
  * IMPLEMENTATION OF WAITING QUEUE
@@ -95,6 +95,8 @@ public:
 	VectorClock ts;
 	Bloom r;
 	Bloom w;
+
+	// fields used to locate the
 };
 
 /*
@@ -167,10 +169,7 @@ public:
 
 				if (sigRaceData->r.hasInCommon(other->w))
 				{
-					fprintf(stderr,
-							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
-							sigRaceData->tid, other->tid);
-					fflush(stderr);
+
 					goto OUTER_FOR;
 				}
 				else if (sigRaceData->w.hasInCommon(other->r))
@@ -201,6 +200,22 @@ public:
 	}
 
 private:
+	void printRaceInfo(string type, int thread1, int thread2)
+	{
+		fprintf(stderr,
+				"-----------------------RACE INFO STARTS-----------------------------");
+
+		GetLock(&fileLock, PIN_ThreadId() + 1);
+		fprintf(stderr,
+				"There may be a data race (%s) between thread-%d & thread-%d !!!\n",
+				type, thread1, thread2);
+//		PIN_GetSourceLocation(insPtr, &col, &lineNumber, &fileName);
+		fprintf(stderr, "The Exact Place: %s @ %d\n");
+		fprintf(stderr,
+				"-----------------------RACE INFO ENDS-------------------------------");
+		fflush(stderr);
+	}
+
 	std::vector<BlockHistoryQueue*> blockHistoryQueues;
 	int threadCount;
 };

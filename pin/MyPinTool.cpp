@@ -72,6 +72,8 @@ BarrierQueueMap barrierWaitMap;
 PIN_LOCK threadIdMapLock;
 ThreadIdMap threadIdMap;
 
+PIN_LOCK fileLock;
+
 RaceDetectionModule rdm;
 
 PIN_LOCK memorySetLock;
@@ -103,6 +105,7 @@ int main(INT32 argc, CHAR **argv)
 		return usage();
 	}
 
+	InitLock(&fileLock);
 	InitLock(&mccLock);
 	InitLock(&lock);
 	InitLock(&threadIdMapLock);
