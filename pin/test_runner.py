@@ -8,7 +8,7 @@ output_file_name = "DR_OUT"
 
 pintool = "/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/pin -t /home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/pin/obj-intel64/MyPinTool.so"
 
-def bcall(cmd):
+def my_exec(cmd):
 	subprocess.Popen(cmd, shell=True).wait()
 
 def bcall(name, app):
@@ -88,7 +88,7 @@ if (enableKernels):
 #for name, app in app_list:
 	#bcall(name, app)
 
-bcall('rm %s' % (output_file_name))
+my_exec('rm %s' % (output_file_name))
 
 bcall(*app_list[0])
 
