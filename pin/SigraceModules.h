@@ -169,7 +169,10 @@ public:
 
 				if (sigRaceData->r.hasInCommon(other->w))
 				{
-
+					fprintf(stderr,
+							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
+							sigRaceData->tid, other->tid);
+					fflush(stderr);
 					goto OUTER_FOR;
 				}
 				else if (sigRaceData->w.hasInCommon(other->r))
