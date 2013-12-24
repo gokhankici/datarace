@@ -50,7 +50,7 @@ KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos",
 		"Cache Coherence Protocol Modules To Simulate");
 
 KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
-		"/home/gokhan/Applications/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
+		"/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
 				"pin/MultiCacheSim-dist/MSI_SMPCache.so",
 		"Reference Protocol that is compared to test Protocols for Correctness");
 
