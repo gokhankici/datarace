@@ -10,7 +10,7 @@
 #define DEFAULT_BLOOM_FILTER_SIZE 2048
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
-#define SET_OVERRIDE
+//#define SET_OVERRIDE
 
 typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
