@@ -202,15 +202,20 @@ public:
 private:
 	void printRaceInfo(string type, int thread1, int thread2)
 	{
+		ADDRINT insPtr = 0; // get this while instrumenting
+		int col = 0;
+		int lineNumber = 0;
+		std::string fileName;
+
 		fprintf(stderr,
 				"-----------------------RACE INFO STARTS-----------------------------");
 
 		GetLock(&fileLock, PIN_ThreadId() + 1);
 		fprintf(stderr,
 				"There may be a data race (%s) between thread-%d & thread-%d !!!\n",
-				type, thread1, thread2);
-//		PIN_GetSourceLocation(insPtr, &col, &lineNumber, &fileName);
-		fprintf(stderr, "The Exact Place: %s @ %d\n");
+				type.c_str(), thread1, thread2);
+		PIN_GetSourceLocation(insPtr, &col, &lineNumber, &fileName);
+		fprintf(stderr, "The Exact Place: %s @ %d\n", fileName.c_str(), lineNumber);
 		fprintf(stderr,
 				"-----------------------RACE INFO ENDS-------------------------------");
 		fflush(stderr);
