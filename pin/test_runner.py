@@ -13,7 +13,7 @@ def my_exec(cmd):
 
 def bcall(name, app):
 	print "\nRunning %s" % (name)
-	cmd = '%s -- %s &>> %s' % (pintool, app, output_file_name)
+	cmd = 'time %s -- %s' % (pintool, app)
 	subprocess.Popen(cmd, shell=True).wait()
 
 enableSimSmall  = 1
@@ -85,11 +85,12 @@ if (enableKernels):
 	name = "canneal (simmedium) 16 threads"
 	app_list.append((name, app))
 
-#for name, app in app_list:
-	#bcall(name, app)
+print 'running tests'
 
-my_exec('rm %s' % (output_file_name))
+for name, app in app_list:
+	bcall(name, app)
 
-bcall(*app_list[0])
+	for i in range(3):
+		print '###################################'
 
 print "done"
