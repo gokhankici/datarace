@@ -49,10 +49,19 @@ KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos",
 		"./MultiCacheSim-dist/MSI_SMPCache.so",
 		"Cache Coherence Protocol Modules To Simulate");
 
+#define ON_MY_MACHINE
+
+#ifdef ON_MY_MACHINE
+KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
+		"/home/gokhan/Applications/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
+				"pin/MultiCacheSim-dist/MSI_SMPCache.so",
+		"Reference Protocol that is compared to test Protocols for Correctness");
+#else
 KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
 		"/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
 				"pin/MultiCacheSim-dist/MSI_SMPCache.so",
 		"Reference Protocol that is compared to test Protocols for Correctness");
+#endif
 
 // <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 TLS_KEY tlsKey;
@@ -78,6 +87,12 @@ RaceDetectionModule rdm;
 
 PIN_LOCK memorySetLock;
 MemorySet memorySet;
+
+// record-n-replay
+UINT32 globalEventId = -1;
+PIN_LOCK recordLock;
+FILE* recordFile = NULL;
+FILE* raceInfoFile = NULL;
 
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -111,6 +126,10 @@ int main(INT32 argc, CHAR **argv)
 	InitLock(&threadIdMapLock);
 	InitLock(&barrierLock);
 	InitLock(&memorySetLock);
+
+	InitLock(&recordLock);
+	recordFile = fopen("record.txt", "w");
+	raceInfoFile = fopen("race_info.txt", "w");
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;

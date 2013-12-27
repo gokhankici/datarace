@@ -11,6 +11,7 @@
 
 #include "Bloom.h"
 #include "VectorClock.h"
+#include "RecordNReplay.h"
 
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define BLOCK_HISTORY_QUEUE_SIZE 16
@@ -95,8 +96,6 @@ public:
 	VectorClock ts;
 	Bloom r;
 	Bloom w;
-
-	// fields used to locate the
 };
 
 /*
@@ -223,6 +222,8 @@ private:
 				"-----------------------RACE INFO ENDS-------------------------------");
 		fflush(stderr);
 	}
+
+
 
 	std::vector<BlockHistoryQueue*> blockHistoryQueues;
 	int threadCount;

@@ -113,7 +113,8 @@ MCS_OBJS = MultiCacheSim-dist/CacheCore.o \
 MY_OBJS = $(OBJDIR)MultiCacheSim_PinDriver.o\
 		  $(OBJDIR)Bloom.o\
 		  $(OBJDIR)PthreadInstumentation.o\
-		  $(OBJDIR)VectorClock.o
+		  $(OBJDIR)VectorClock.o\
+		  $(OBJDIR)RecordNReplay.o\
 
 $(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(MY_OBJS)
 	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) $(MCS_OBJS) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS) $(DBG) -lrt

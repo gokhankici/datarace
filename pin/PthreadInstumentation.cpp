@@ -1,7 +1,9 @@
+#include <stdio.h>
+#include <assert.h>
+
 #include "PthreadInstumentation.h"
 #include "GlobalVariables.h"
-
-#include <assert.h>
+#include "RecordNReplay.h"
 
 /*static void writeInHex(const unsigned char* data, int len)
  {
@@ -47,6 +49,8 @@ static void printSignatures()
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
+	PrintRecordInfo(tid, CREATE);
+
 	GetLock(&lock, tid + 1);
 	++globalId;
 	rdm.addProcessor();
@@ -117,6 +121,9 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 // This routine is executed every time a thread is destroyed.
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
+	if(recordFile)
+		fflush(recordFile);
+
 	ThreadLocalStorage* tls = getTLS(tid);
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
@@ -209,6 +216,8 @@ VOID AfterLock(THREADID tid)
 		return;
 	}
 
+	PrintRecordInfo(tid, LOCK);
+
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
@@ -267,6 +276,8 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 		return;
 	}
 
+	PrintRecordInfo(tid, UNLOCK);
+
 	ThreadLocalStorage* tls = getTLS(tid);
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
@@ -313,6 +324,8 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 		return;
 	}
 
+	PrintRecordInfo(tid, COND_WAIT);
+
 #ifdef DEBUG_MODE
 	printf(
 			"Thread %d began waiting on condition variable[%lX] with lock[%lX].\n",
@@ -349,6 +362,8 @@ VOID AfterCondWait(THREADID tid)
 	{
 		return;
 	}
+
+	PrintRecordInfo(tid, COND_WAIT);
 
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
@@ -388,6 +403,8 @@ VOID AfterCondWait(THREADID tid)
 VOID BeforeBarrierWait(ADDRINT barrierAddr, THREADID tid, char* imageName,
 		ADDRINT stackPtr)
 {
+	PrintRecordInfo(tid, BARRIER_WAIT);
+
 	ThreadLocalStorage* tls = getTLS(tid);
 	tls->barrierAddr = barrierAddr;
 
@@ -442,6 +459,8 @@ VOID BeforeBarrierWait(ADDRINT barrierAddr, THREADID tid, char* imageName,
 
 VOID AfterBarrierWait(int returnCode, THREADID tid)
 {
+	PrintRecordInfo(tid, BARRIER_WAIT);
+
 	bool found = false;
 	ThreadLocalStorage* tls = getTLS(tid);
 	ADDRINT barrierAddr = tls->barrierAddr;
@@ -510,6 +529,8 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 		return;
 	}
 
+	PrintRecordInfo(tid, COND_SIGNAL);
+
 	ThreadLocalStorage* tls = getTLS(tid);
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
@@ -543,6 +564,7 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 
 VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID tid)
 {
+	PrintRecordInfo(tid, COND_BROADCAST);
 	BeforeCondSignal(condVarAddr, tid);
 }
 
