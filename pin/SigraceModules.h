@@ -62,14 +62,47 @@ public:
 typedef std::map<ADDRINT, ThreadInfo> UnlockThreadMap;
 typedef UnlockThreadMap::iterator UnlockThreadIterator;
 
-//typedef std::map< ADDRINT, list<ThreadInfo*>* > NotifyThreadMap;
 typedef std::map<ADDRINT, ThreadInfo> NotifyThreadMap;
 typedef NotifyThreadMap::iterator NotifyThreadIterator;
 
-typedef std::list<ThreadInfo*> BarrierQueue;
-typedef BarrierQueue::iterator BarrierQueueIterator;
-typedef std::map<ADDRINT, BarrierQueue*> BarrierQueueMap;
-typedef BarrierQueueMap::iterator BarrierQueueMapIterator;
+//typedef std::list<ThreadInfo*> BarrierQueue;
+//typedef BarrierQueue::iterator BarrierQueueIterator;
+
+class BarrierData
+{
+public:
+	VectorClock* vectorClock;
+	VectorClock* previousVectorClock;
+	int barrierSize;
+	int waiterCount;
+
+	BarrierData(int barrierSize)
+	{
+		vectorClock = new VectorClock();
+		previousVectorClock = NULL;
+		this->barrierSize = barrierSize;
+		waiterCount = 0;
+	}
+
+	BarrierData()
+	{
+		vectorClock = new VectorClock();
+		previousVectorClock = NULL;
+		barrierSize = 0;
+		waiterCount = 0;
+	}
+
+	~BarrierData()
+	{
+		if (vectorClock)
+			delete vectorClock;
+		if (previousVectorClock)
+			delete previousVectorClock;
+	}
+};
+
+typedef std::map<ADDRINT, BarrierData*> BarrierMap;
+typedef BarrierMap::iterator BarrierMapItr;
 
 /*
  * IMPLEMENTATION OF THREAD SYNCHRONIZATION SIGNATURE
@@ -217,13 +250,12 @@ private:
 				"There may be a data race (%s) between thread-%d & thread-%d !!!\n",
 				type.c_str(), thread1, thread2);
 		PIN_GetSourceLocation(insPtr, &col, &lineNumber, &fileName);
-		fprintf(stderr, "The Exact Place: %s @ %d\n", fileName.c_str(), lineNumber);
+		fprintf(stderr, "The Exact Place: %s @ %d\n", fileName.c_str(),
+				lineNumber);
 		fprintf(stderr,
 				"-----------------------RACE INFO ENDS-------------------------------");
 		fflush(stderr);
 	}
-
-
 
 	std::vector<BlockHistoryQueue*> blockHistoryQueues;
 	int threadCount;
@@ -289,5 +321,8 @@ public:
 };
 typedef std::set<MemoryArea> MemorySet;
 typedef MemorySet::iterator MemorySetItr;
+
+typedef std::map<ADDRINT, VectorClock> CollectiveBarrierVCMap;
+typedef CollectiveBarrierVCMap::iterator CollectiveBarrierVCMapItr;
 
 #endif

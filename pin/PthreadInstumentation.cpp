@@ -49,11 +49,16 @@ static void printSignatures()
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
+	static int x = 0;
+
 	PrintRecordInfo(tid, CREATE);
 
 	GetLock(&lock, tid + 1);
 	++globalId;
 	rdm.addProcessor();
+
+	printf("TID: %d |||| X: %d\n", tid, x);
+	x++;
 	ReleaseLock(&lock);
 
 	ThreadLocalStorage* tls = new ThreadLocalStorage();
@@ -121,7 +126,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 // This routine is executed every time a thread is destroyed.
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
-	if(recordFile)
+	if (recordFile)
 		fflush(recordFile);
 
 	ThreadLocalStorage* tls = getTLS(tid);
@@ -181,22 +186,6 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	delete tls;
 
 	PIN_SetThreadData(tlsKey, 0, tid);
-}
-
-VOID BeforePthreadCreate(pthread_t* ptid, THREADID tid)
-{
-}
-
-VOID AfterPthreadCreate(THREADID tid)
-{
-}
-
-VOID BeforePthreadJoin(pthread_t ptid, THREADID tid)
-{
-}
-
-VOID AfterPthreadJoin(THREADID tid)
-{
 }
 
 // This routine is executed each time lock is called.
@@ -400,23 +389,52 @@ VOID AfterCondWait(THREADID tid)
 	writeFilter->clear();
 }
 
-VOID BeforeBarrierWait(ADDRINT barrierAddr, THREADID tid, char* imageName,
-		ADDRINT stackPtr)
+VOID BarrierInit(THREADID tid, ADDRINT barrier, int size)
+{
+	GetLock(&barrierLock, tid + 1);
+
+	// find the barrier list to wait
+	BarrierMapItr barrierQueueItr = barrierWaitMap.find((ADDRINT) barrier);
+
+	BarrierData* barrierData = NULL;
+
+	if (barrierQueueItr != barrierWaitMap.end())
+	{
+		barrierData = barrierQueueItr->second;
+	}
+
+	if (barrierData != NULL)
+	{
+		// remove the previous entry (if any)
+		delete barrierData;
+	}
+
+	// add the new barrier to the map
+	barrierData = new BarrierData(size);
+	barrierWaitMap[barrier] = barrierData;
+
+	ReleaseLock(&barrierLock);
+}
+
+VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
 {
 	PrintRecordInfo(tid, BARRIER_WAIT);
 
 	ThreadLocalStorage* tls = getTLS(tid);
-	tls->barrierAddr = barrierAddr;
+	tls->barrierAddr = barrier;
 
 	GetLock(&barrierLock, tid + 1);
 
 	// find the barrier list to wait
-	BarrierQueueMapIterator barrierQueueItr = barrierWaitMap.find(barrierAddr);
-	BarrierQueue* barrierQueue = NULL;
+	BarrierMapItr barrierQueueItr = barrierWaitMap.find(barrier);
+
+	BarrierData* barrierData = NULL;
+
 	if (barrierQueueItr != barrierWaitMap.end())
 	{
-		barrierQueue = barrierQueueItr->second;
+		barrierData = barrierQueueItr->second;
 	}
+	assert(barrierData);
 
 	printSignatures();
 	// add current signature to the rdm
@@ -437,17 +455,15 @@ VOID BeforeBarrierWait(ADDRINT barrierAddr, THREADID tid, char* imageName,
 	fflush(stdout);
 #endif
 
-	// add my value to the list
-	if (barrierQueue != NULL)
+	// update the shared vector clock between waiting threads
+	barrierData->vectorClock->set(tid, tls->vectorClock->get());
+
+	if (++(barrierData->waiterCount) == barrierData->barrierSize)
 	{
-		barrierQueue->push_back(new ThreadInfo(tid, *tls->vectorClock));
-	}
-	else
-	{
-		// create barrier queue if it doesn't exist
-		barrierQueue = new std::list<ThreadInfo*>;
-		barrierQueue->push_back(new ThreadInfo(tid, *tls->vectorClock));
-		barrierWaitMap[barrierAddr] = barrierQueue;
+		// if this is the last thread, handle the bookkeeping
+		barrierData->waiterCount = 0;
+		barrierData->previousVectorClock = barrierData->vectorClock;
+		barrierData->vectorClock->clear();
 	}
 
 	ReleaseLock(&barrierLock);
@@ -459,58 +475,29 @@ VOID BeforeBarrierWait(ADDRINT barrierAddr, THREADID tid, char* imageName,
 
 VOID AfterBarrierWait(int returnCode, THREADID tid)
 {
+	// an error occured while waiting in the barrier
+	if (returnCode != 0 && returnCode != PTHREAD_BARRIER_SERIAL_THREAD)
+	{
+		return;
+	}
+
 	PrintRecordInfo(tid, BARRIER_WAIT);
 
-	bool found = false;
 	ThreadLocalStorage* tls = getTLS(tid);
-	ADDRINT barrierAddr = tls->barrierAddr;
+	ADDRINT barrierAddr = (ADDRINT) tls->barrierAddr;
 
 	GetLock(&barrierLock, tid + 1);
 
 	// find the correct barrier waiting queue
-	BarrierQueueMapIterator barrierQueueItr = barrierWaitMap.find(barrierAddr);
-	BarrierQueue* barrierQueue = NULL;
-	if (barrierQueueItr != barrierWaitMap.end())
+	BarrierMapItr barrierMapItr = barrierWaitMap.find(barrierAddr);
+	BarrierData* barrierData = NULL;
+	if (barrierMapItr != barrierWaitMap.end())
 	{
-		barrierQueue = barrierQueueItr->second;
+		barrierData = barrierMapItr->second;
 	}
-	assert(barrierQueue != NULL);
-	VectorClock myClock;
+	assert(barrierData != NULL);
 
-	// find your entry in the list and remove it
-	BarrierQueueIterator bqItr = barrierQueue->begin();
-	for (; bqItr != barrierQueue->end(); ++bqItr)
-	{
-		ThreadInfo* info = *bqItr;
-		if (info->tid == tid)
-		{
-			myClock = info->vectorClock;
-			barrierQueue->erase(bqItr);
-			found = true;
-			delete info;
-			break;
-		}
-	}
-	assert(found);
-
-	// an error occured while waiting in the barrier
-	if (returnCode != 0 && returnCode != PTHREAD_BARRIER_SERIAL_THREAD)
-	{
-		ReleaseLock(&barrierLock);
-		return;
-	}
-
-	// handshake with all other barrier waiters
-	bqItr = barrierQueue->begin();
-	for (; bqItr != barrierQueue->end(); ++bqItr)
-	{
-		ThreadInfo* info = *bqItr;
-		myClock.receiveAction(info->vectorClock);
-		info->vectorClock.receiveAction(myClock);
-	}
-
-	// update the clock in TLS
-	*(tls->vectorClock) = myClock;
+	tls->vectorClock->receiveAction(*(barrierData->previousVectorClock));
 
 #ifdef DEBUG_MODE
 	printf("%d is exiting after the barrier %ld\n", tid, barrierAddr);

@@ -19,7 +19,7 @@ extern PIN_LOCK threadIdMapLock;
 extern ThreadIdMap threadIdMap;
 
 extern PIN_LOCK barrierLock;
-extern BarrierQueueMap barrierWaitMap;
+extern BarrierMap barrierWaitMap;
 
 extern KNOB<string> KnobOutputFile;
 extern KNOB<bool> KnobStopOnError;
@@ -42,16 +42,12 @@ VOID AfterLock(THREADID tid);
 
 VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid);
 
-VOID BeforePthreadCreate(pthread_t* ptid, THREADID id);
-VOID AfterPthreadCreate(THREADID tid);
-VOID BeforePthreadJoin(pthread_t ptid, THREADID id);
-VOID AfterPthreadJoin(THREADID tid);
-
 VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID id);
 VOID AfterCondWait(THREADID id);
 
-VOID AfterBarrirerWait(ADDRINT barrierAddr, THREADID id);
-VOID BeforeBarrirerWait(ADDRINT condVarAddr, THREADID id);
+VOID BarrierInit(ADDRINT barrier, int size);
+VOID BeforeBarrierWait(ADDRINT barrier, THREADID id);
+VOID AfterBarrierWait(int returnCode, THREADID id);
 
 VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id);
 VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id);

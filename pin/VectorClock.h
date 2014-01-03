@@ -15,29 +15,36 @@
 class VectorClock
 {
 private:
-	UINT32* v;
+	UINT32* vc;
 public:
 	int threadId;
-	void advance();
+	static int totalProcessCount;
+	static int totalDeletedLockCount;
+
+	// constructors & destructor
 	VectorClock();
 	VectorClock(const VectorClock& copyVC);
 	VectorClock(int processId);
 	VectorClock(VectorClock& inClockPtr, int processId);
 	~VectorClock();
-	void toString();
+
+	// actions
+	void advance();
 	void receiveAction(VectorClock& vectorClockReceived);
 	void receiveActionFromSpecialPoint(VectorClock& vectorClockReceived,
 			UINT32 specialPoint);
-	UINT32* getValues() const;
 	void sendEvent();
+	void set(int index, UINT32 value);
+	UINT32 get();
+	void clear();
+
+	// happens-before functions
 	bool happensBefore(const VectorClock& input); //OK
 	bool happensBeforeSpecial(const VectorClock* input, UINT32 processId);
+	bool areConcurrent(VectorClock& vectorClockReceived, ADDRINT processId);
 	bool isUniqueValue(int processIdIn);
-	bool isEmpty();
 
-public:
-	static int totalProcessCount;
-	static int totalDeletedLockCount;
+	// operators
 	VectorClock& operator++(); //prefix increment ++vclock
 	VectorClock operator++(int x); //postfix increment
 	const VectorClock& operator=(const VectorClock& vcRight);
@@ -45,10 +52,12 @@ public:
 	bool operator!=(const VectorClock &vRight);
 	bool operator<(const VectorClock& vRight);
 	bool operator<=(const VectorClock& vRight);
-	bool areConcurrent(VectorClock& vectorClockReceived, ADDRINT processId);
 	friend ostream& operator<<(ostream& os, const VectorClock &v);
 
+	// utilities
+	bool isEmpty();
 	void printVector(FILE* out);
+	void toString();
 };
 
 #endif /* VECTORCLOCK_H_ */

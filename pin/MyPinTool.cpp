@@ -76,7 +76,7 @@ UnlockThreadMap* unlockedThreadMap;
 NotifyThreadMap* notifiedThreadMap;
 
 PIN_LOCK barrierLock;
-BarrierQueueMap barrierWaitMap;
+BarrierMap barrierWaitMap;
 
 PIN_LOCK threadIdMapLock;
 ThreadIdMap threadIdMap;

@@ -4,6 +4,7 @@
 #include <iomanip>
 #include <stdio.h>
 #include <string.h>
+#include <assert.h>
 
 int VectorClock::totalProcessCount = MAX_VC_SIZE;
 int VectorClock::totalDeletedLockCount = 0;
@@ -14,20 +15,21 @@ VectorClock::VectorClock()
 	threadId = NON_THREAD_VECTOR_CLOCK;
 
 	size_t byteCount = sizeof(int) * totalProcessCount;
-	v = (UINT32*) malloc(byteCount);
-	memset(v, 0, byteCount);
+	vc = (UINT32*) malloc(byteCount);
+	memset(vc, 0, byteCount);
 }
 
 VectorClock::VectorClock(int processIdIn)
 {
 	threadId = processIdIn;
+	assert(threadId < totalProcessCount);
 
 	size_t byteCount = sizeof(int) * totalProcessCount;
-	v = (UINT32*) malloc(byteCount);
-	memset(v, 0, byteCount);
+	vc = (UINT32*) malloc(byteCount);
+	memset(vc, 0, byteCount);
 
 	if (threadId != NON_THREAD_VECTOR_CLOCK)
-		v[processIdIn] = 1;
+		vc[processIdIn] = 1;
 }
 
 /*
@@ -39,24 +41,24 @@ VectorClock::VectorClock(VectorClock& vectorClock, int processId)
 	this->threadId = processId;
 
 	// increment values to create a happens before relationship
-	v[threadId]++;
-	v[vectorClock.threadId]++;
+	vc[threadId]++;
+	vc[vectorClock.threadId]++;
 }
 
 VectorClock::VectorClock(const VectorClock& copyVC)
 {
 	threadId = copyVC.threadId;
 	size_t byteCount = sizeof(int) * totalProcessCount;
-	v = (UINT32*) malloc(byteCount);
-	memcpy(v, copyVC.v, byteCount);
+	vc = (UINT32*) malloc(byteCount);
+	memcpy(vc, copyVC.vc, byteCount);
 }
 
 const VectorClock& VectorClock::operator=(const VectorClock& vcRight)
 {
 	threadId = vcRight.threadId;
 	size_t byteCount = sizeof(int) * totalProcessCount;
-	v = (UINT32*) malloc(byteCount);
-	memcpy(v, vcRight.v, byteCount);
+	vc = (UINT32*) malloc(byteCount);
+	memcpy(vc, vcRight.vc, byteCount);
 
 	return *this;
 }
@@ -64,7 +66,7 @@ const VectorClock& VectorClock::operator=(const VectorClock& vcRight)
 VectorClock::~VectorClock()
 {
 	totalDeletedLockCount++;
-	free(v);
+	free(vc);
 }
 
 void VectorClock::sendEvent()
@@ -72,29 +74,42 @@ void VectorClock::sendEvent()
 	advance();
 }
 
-void VectorClock::advance()
+void VectorClock::set(int index, UINT32 value)
 {
-	v[threadId]++;
+	assert(index < totalProcessCount);
+	vc[index] = value;
 }
 
-UINT32* VectorClock::getValues() const
+UINT32 VectorClock::get()
 {
-	return v;
+	assert(threadId != NON_THREAD_VECTOR_CLOCK);
+	return vc[threadId];
+}
+
+void VectorClock::clear()
+{
+	memset(vc, 0, totalProcessCount * sizeof(UINT32));
+}
+
+void VectorClock::advance()
+{
+	vc[threadId]++;
 }
 
 void VectorClock::receiveAction(VectorClock& vectorClockReceived)
 {
-	UINT32 *receivedClockValues = vectorClockReceived.getValues();
+	UINT32 *receivedClockValues = vectorClockReceived.vc;
 	for (int i = 0; i < totalProcessCount; ++i)
-		v[i] = (v[i] > receivedClockValues[i]) ? v[i] : receivedClockValues[i];
+		vc[i] = (vc[i] > receivedClockValues[i]) ?
+				vc[i] : receivedClockValues[i];
 
 }
 
 void VectorClock::receiveActionFromSpecialPoint(
 		VectorClock& vectorClockReceived, UINT32 specialPoint)
 {
-	UINT32 *receivedClockValues = vectorClockReceived.getValues();
-	v[specialPoint] = receivedClockValues[specialPoint];
+	UINT32 *receivedClockValues = vectorClockReceived.vc;
+	vc[specialPoint] = receivedClockValues[specialPoint];
 }
 
 bool VectorClock::happensBefore(const VectorClock& input)
@@ -107,7 +122,7 @@ bool VectorClock::isUniqueValue(int processIdIn)
 	bool isUnique = true;
 	for (int i = 0; i < totalProcessCount; ++i)
 	{
-		if (v[i] > 0 && i != processIdIn)
+		if (vc[i] > 0 && i != processIdIn)
 		{
 			isUnique = false;
 			break;
@@ -121,7 +136,7 @@ bool VectorClock::isEmpty()
 {
 	for (int i = 0; i < totalProcessCount; ++i)
 	{
-		if (v[i] != 0)
+		if (vc[i] != 0)
 			return false;
 	}
 
@@ -131,14 +146,14 @@ bool VectorClock::isEmpty()
 bool VectorClock::happensBeforeSpecial(const VectorClock* input,
 		UINT32 processId)
 {
-	UINT32* vRightValues = input->getValues();
+	UINT32* vRightValues = input->vc;
 	for (int i = 0; i < totalProcessCount; ++i)
 	{
 		if ((uint32_t) i == processId)
 			continue;
 
 		//at least ONE value is stricly smaller
-		if (v[i] > 0 && v[i] >= vRightValues[i])
+		if (vc[i] > 0 && vc[i] >= vRightValues[i])
 			return true;
 	}
 
@@ -162,7 +177,7 @@ void VectorClock::toString()
 ostream& operator<<(ostream& os, const VectorClock& v)
 {
 	os << "Vector Clock Of " << v.threadId << ":" << endl;
-	UINT32 *values = v.getValues();
+	UINT32 *values = v.vc;
 //	for (int i = 0; i < v.totalProcessCount; ++i)
 	for (int i = 0; i < 3; ++i)
 	{
@@ -175,14 +190,14 @@ ostream& operator<<(ostream& os, const VectorClock& v)
 
 VectorClock& VectorClock::operator++()
 {
-	v[threadId]++;
+	vc[threadId]++;
 	return *this;
 }
 
 VectorClock VectorClock::operator++(int)
 {
 	VectorClock tmp = *this;
-	v[threadId]++;
+	vc[threadId]++;
 	return tmp;
 }
 
@@ -215,13 +230,13 @@ bool VectorClock::operator<(const VectorClock& vRight)
 {
 	if (threadId == vRight.threadId)
 	{
-		return v[threadId] < vRight.v[vRight.threadId];
+		return vc[threadId] < vRight.vc[vRight.threadId];
 	}
 
-	UINT32 l_l = v[threadId];
-	UINT32 l_r = v[vRight.threadId];
-	UINT32 r_r = vRight.v[vRight.threadId];
-	UINT32 r_l = vRight.v[threadId];
+	UINT32 l_l = vc[threadId];
+	UINT32 l_r = vc[vRight.threadId];
+	UINT32 r_r = vRight.vc[vRight.threadId];
+	UINT32 r_l = vRight.vc[threadId];
 
 	// both threads' values are lower in the lhs thread
 	return l_l < r_l && l_r < r_r;
@@ -234,9 +249,9 @@ bool VectorClock::operator!=(const VectorClock& vRight)
 
 bool VectorClock::operator==(const VectorClock& vRight)
 {
-	UINT32 *vRightValues = vRight.getValues();
+	UINT32 *vRightValues = vRight.vc;
 	for (int i = 0; i < totalProcessCount; ++i)
-		if (v[i] != vRightValues[i])
+		if (vc[i] != vRightValues[i])
 			return false;
 
 	return true;
@@ -247,7 +262,7 @@ void VectorClock::printVector(FILE* out)
 	fprintf(out, "Vector Clock Of %d:\n", threadId);
 	for (int i = 0; i < totalProcessCount; ++i)
 	{
-		fprintf(out, "%d - ", v[i]);
+		fprintf(out, "%d - ", vc[i]);
 	}
 	fprintf(out, "\n");
 }
