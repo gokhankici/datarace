@@ -50,10 +50,12 @@ VOID addToReadFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 	{
 		ThreadLocalStorage* tls =
 				static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
-		FILE* out = tls->out;
 		Bloom* readSig = tls->readBloomFilter;
 
-		fprintf(out, "R : %lX\n", addr);
+#ifdef WRITE_ADDRESSES_TO_LOG_FILE
+		fprintf(tls->out, "R : %lX\n", addr);
+#endif
+
 		readSig->add(BLOOM_ADDR(addr) );
 	}
 }
@@ -66,36 +68,36 @@ void Read(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 
 	/* addition of MultiCacheSim coherency protocols */
 	/*
-	GetLock(&mccLock, 1);
-	ReferenceProtocol->readLine(tid, inst, addr);
-	std::vector<MultiCacheSim *>::iterator i, e;
-	for (i = Caches.begin(), e = Caches.end(); i != e; i++)
-	{
-		(*i)->readLine(tid, inst, addr);
-		if (stopOnError || printOnError)
-		{
-			if (ReferenceProtocol->getStateAsInt(tid, addr)
-					!= (*i)->getStateAsInt(tid, addr))
-			{
-				if (printOnError)
-				{
-					fprintf(stderr,
-							"[MCS-Read] State of Protocol %s did not match the reference\nShould have been %d but it was %d\n",
-							(*i)->Identify(),
-							ReferenceProtocol->getStateAsInt(tid, addr),
-							(*i)->getStateAsInt(tid, addr));
-				}
+	 GetLock(&mccLock, 1);
+	 ReferenceProtocol->readLine(tid, inst, addr);
+	 std::vector<MultiCacheSim *>::iterator i, e;
+	 for (i = Caches.begin(), e = Caches.end(); i != e; i++)
+	 {
+	 (*i)->readLine(tid, inst, addr);
+	 if (stopOnError || printOnError)
+	 {
+	 if (ReferenceProtocol->getStateAsInt(tid, addr)
+	 != (*i)->getStateAsInt(tid, addr))
+	 {
+	 if (printOnError)
+	 {
+	 fprintf(stderr,
+	 "[MCS-Read] State of Protocol %s did not match the reference\nShould have been %d but it was %d\n",
+	 (*i)->Identify(),
+	 ReferenceProtocol->getStateAsInt(tid, addr),
+	 (*i)->getStateAsInt(tid, addr));
+	 }
 
-				if (stopOnError)
-				{
-					exit(1);
-				}
-			}
-		}
-	}
+	 if (stopOnError)
+	 {
+	 exit(1);
+	 }
+	 }
+	 }
+	 }
 
-	ReleaseLock(&mccLock);
-	*/
+	 ReleaseLock(&mccLock);
+	 */
 }
 
 VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
@@ -104,9 +106,11 @@ VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 	{
 		ThreadLocalStorage* tls =
 				static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
-		FILE* out = tls->out;
 		Bloom* writeSig = tls->writeBloomFilter;
-		fprintf(out, "W : %lX\n", addr);
+
+#ifdef WRITE_ADDRESSES_TO_LOG_FILE
+		fprintf(tls->out, "W : %lX\n", addr);
+#endif
 
 		writeSig->add(BLOOM_ADDR(addr) );
 	}
@@ -119,37 +123,37 @@ void Write(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
 	addToWriteFilter(tid, addr, stackPtr);
 
 	/*
-	GetLock(&mccLock, 1);
-	ReferenceProtocol->writeLine(tid, inst, addr);
-	std::vector<MultiCacheSim *>::iterator i, e;
+	 GetLock(&mccLock, 1);
+	 ReferenceProtocol->writeLine(tid, inst, addr);
+	 std::vector<MultiCacheSim *>::iterator i, e;
 
-	for (i = Caches.begin(), e = Caches.end(); i != e; i++)
-	{
-		(*i)->writeLine(tid, inst, addr);
+	 for (i = Caches.begin(), e = Caches.end(); i != e; i++)
+	 {
+	 (*i)->writeLine(tid, inst, addr);
 
-		if (stopOnError || printOnError)
-		{
-			if (ReferenceProtocol->getStateAsInt(tid, addr)
-					!= (*i)->getStateAsInt(tid, addr))
-			{
-				if (printOnError)
-				{
-					fprintf(stderr,
-							"[MCS-Write] State of Protocol %s did not match the reference\nShould have been %d but it was %d\n",
-							(*i)->Identify(),
-							ReferenceProtocol->getStateAsInt(tid, addr),
-							(*i)->getStateAsInt(tid, addr));
-				}
+	 if (stopOnError || printOnError)
+	 {
+	 if (ReferenceProtocol->getStateAsInt(tid, addr)
+	 != (*i)->getStateAsInt(tid, addr))
+	 {
+	 if (printOnError)
+	 {
+	 fprintf(stderr,
+	 "[MCS-Write] State of Protocol %s did not match the reference\nShould have been %d but it was %d\n",
+	 (*i)->Identify(),
+	 ReferenceProtocol->getStateAsInt(tid, addr),
+	 (*i)->getStateAsInt(tid, addr));
+	 }
 
-				if (stopOnError)
-				{
-					exit(1);
-				}
-			}
-		}
-	}
-	ReleaseLock(&mccLock);
-	*/
+	 if (stopOnError)
+	 {
+	 exit(1);
+	 }
+	 }
+	 }
+	 }
+	 ReleaseLock(&mccLock);
+	 */
 }
 
 void processMemoryWriteInstruction(INS ins, const char* imageName)

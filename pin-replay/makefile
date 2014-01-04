@@ -68,6 +68,7 @@ TOOL_ROOTS = MyPinTool
 
 TOOLS = $(TOOL_ROOTS:%=$(OBJDIR)%$(PINTOOL_SUFFIX))
 
+INC_DIRS = -I.
 
 ##############################################################
 #
@@ -89,7 +90,7 @@ $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
 $(OBJDIR)%.o : %.cpp
-	$(CXX) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
+	$(CXX) $(INC_DIRS) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
 
 $(TOOLS): $(PIN_LIBNAMES)
 

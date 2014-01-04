@@ -5,3 +5,5 @@ lock_mt.out.*
 *.log
 *.swp
 *.txt
+
+thread_epochs.* 

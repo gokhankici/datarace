@@ -15,6 +15,7 @@
 #include "GlobalVariables.h"
 #include "MultiCacheSim-dist/MultiCacheSim.h"
 #define MAX_NTHREADS 64
+//#define WRITE_ADDRESSES_TO_LOG_FILE
 
 extern std::vector<MultiCacheSim *> Caches;
 extern MultiCacheSim *ReferenceProtocol;

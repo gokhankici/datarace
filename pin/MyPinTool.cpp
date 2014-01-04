@@ -16,7 +16,7 @@
 
 /* === KNOB DEFINITIONS =================================== */
 
-KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "lock_mt.out",
+KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "thread_epochs",
 		"specify output file name");
 
 KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool", "stopOnProtoBug",
@@ -59,7 +59,7 @@ KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
 #else
 KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
 		"/home/gokhankici/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"
-				"pin/MultiCacheSim-dist/MSI_SMPCache.so",
+		"pin/MultiCacheSim-dist/MSI_SMPCache.so",
 		"Reference Protocol that is compared to test Protocols for Correctness");
 #endif
 
@@ -94,6 +94,11 @@ PIN_LOCK recordLock;
 FILE* recordFile = NULL;
 FILE* raceInfoFile = NULL;
 
+THREADID lastParent = 0;
+int createdThreadCount = 0;
+FILE* createFile;
+PIN_LOCK createLock;
+
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 INT32 usage()
@@ -126,10 +131,12 @@ int main(INT32 argc, CHAR **argv)
 	InitLock(&threadIdMapLock);
 	InitLock(&barrierLock);
 	InitLock(&memorySetLock);
-
+	InitLock(&createLock);
 	InitLock(&recordLock);
+
 	recordFile = fopen("record.txt", "w");
 	raceInfoFile = fopen("race_info.txt", "w");
+	createFile = fopen("create.txt", "w");
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;

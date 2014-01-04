@@ -7,6 +7,8 @@
 #include "SigraceModules.h"
 #include "Bloom.h"
 
+#define PRINT_SYNC_FUNCTION
+
 extern UINT32 globalId;
 extern PIN_LOCK lock;
 
@@ -32,10 +34,19 @@ extern KNOB<unsigned int> KnobNumCaches;
 extern KNOB<string> KnobProtocol;
 extern KNOB<string> KnobReference;
 
+// variables to handle the order of thread creation
+extern THREADID lastParent;
+extern int createdThreadCount;
+extern FILE* createFile;
+extern PIN_LOCK createLock;
+
 VOID ImageLoad(IMG img, VOID *);
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v);
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
+
+VOID BeforeCreate(THREADID parent_tid, pthread_t *thread,
+		const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);
 
 VOID BeforeLock(ADDRINT lockAddr, THREADID tid);
 VOID AfterLock(THREADID tid);

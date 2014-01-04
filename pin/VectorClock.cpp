@@ -178,10 +178,9 @@ ostream& operator<<(ostream& os, const VectorClock& v)
 {
 	os << "Vector Clock Of " << v.threadId << ":" << endl;
 	UINT32 *values = v.vc;
-//	for (int i = 0; i < v.totalProcessCount; ++i)
-	for (int i = 0; i < 3; ++i)
+	for (int i = 0; i < v.totalProcessCount; ++i)
 	{
-		os << values[i] << " - ";
+		os << values[i] << ",";
 	}
 	os << endl;
 
@@ -259,10 +258,9 @@ bool VectorClock::operator==(const VectorClock& vRight)
 
 void VectorClock::printVector(FILE* out)
 {
-	fprintf(out, "Vector Clock Of %d:\n", threadId);
 	for (int i = 0; i < totalProcessCount; ++i)
 	{
-		fprintf(out, "%d - ", vc[i]);
+		fprintf(out, "%d,", vc[i]);
 	}
 	fprintf(out, "\n");
 }

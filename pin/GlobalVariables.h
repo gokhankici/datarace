@@ -8,7 +8,7 @@
 #define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
 #define MAX_VC_SIZE 32
 
-//#define DEBUG_MODE
+#define DEBUG_MODE
 
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
