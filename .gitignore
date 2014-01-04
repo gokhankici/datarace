@@ -4,3 +4,4 @@ obj-intel64
 lock_mt.out.*
 *.log
 *.swp
+*.txt
