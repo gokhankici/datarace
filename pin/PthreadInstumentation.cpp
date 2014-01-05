@@ -105,6 +105,9 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 #endif
 
 		parentVC->advance();
+		parentRead->clear();
+		parentWrite->clear();
+
 		ReleaseLock(&lock);
 	}
 	else
@@ -181,6 +184,8 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		// update parent's vc
 		parentVC->receiveAction(*vectorClock);
 		parentVC->advance();
+		parentRead->clear();
+		parentWrite->clear();
 
 		ReleaseLock(&lock);
 	}

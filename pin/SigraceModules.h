@@ -204,7 +204,12 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
+					sigRaceData->ts.printVector(stderr);
+					fprintf(stderr, "Thread %d VC:\n", other->tid);
+					other->ts.printVector(stderr);
 					fflush(stderr);
+
 					goto OUTER_FOR;
 				}
 				else if (sigRaceData->w.hasInCommon(other->r))
@@ -212,6 +217,10 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
+					sigRaceData->ts.printVector(stderr);
+					fprintf(stderr, "Thread %d VC:\n", other->tid);
+					other->ts.printVector(stderr);
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
@@ -220,6 +229,10 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
+					sigRaceData->ts.printVector(stderr);
+					fprintf(stderr, "Thread %d VC:\n", other->tid);
+					other->ts.printVector(stderr);
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
