@@ -9,8 +9,7 @@
 
 #define PRINT_SYNC_FUNCTION
 
-extern UINT32 globalId;
-extern PIN_LOCK lock;
+extern PIN_LOCK rdmLock;
 
 //extern WaitQueueMap* waitQueueMap;
 extern UnlockThreadMap* unlockedThreadMap;
@@ -38,15 +37,11 @@ extern KNOB<string> KnobReference;
 extern THREADID lastParent;
 extern int createdThreadCount;
 extern FILE* createFile;
-extern PIN_LOCK createLock;
 
 VOID ImageLoad(IMG img, VOID *);
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v);
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
-
-VOID BeforeCreate(THREADID parent_tid, pthread_t *thread,
-		const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg);
 
 VOID BeforeLock(ADDRINT lockAddr, THREADID tid);
 VOID AfterLock(THREADID tid);
@@ -56,7 +51,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid);
 VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID id);
 VOID AfterCondWait(THREADID id);
 
-VOID BarrierInit(ADDRINT barrier, int size);
+VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, int size);
 VOID BeforeBarrierWait(ADDRINT barrier, THREADID id);
 VOID AfterBarrierWait(int returnCode, THREADID id);
 

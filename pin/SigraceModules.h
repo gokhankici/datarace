@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <list>
 #include <map>
+#include <assert.h>
 
 #include "Bloom.h"
 #include "VectorClock.h"
@@ -15,8 +16,10 @@
 
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define BLOCK_HISTORY_QUEUE_SIZE 16
+#define MAX_VC_SIZE 32
 
 extern PIN_LOCK fileLock;
+extern PIN_LOCK rdmLock;
 
 /*
  * IMPLEMENTATION OF WAITING QUEUE
@@ -59,45 +62,31 @@ public:
 		this->vectorClock = vc;
 	}
 };
+
 typedef std::map<ADDRINT, ThreadInfo> UnlockThreadMap;
 typedef UnlockThreadMap::iterator UnlockThreadIterator;
 
 typedef std::map<ADDRINT, ThreadInfo> NotifyThreadMap;
 typedef NotifyThreadMap::iterator NotifyThreadIterator;
 
-//typedef std::list<ThreadInfo*> BarrierQueue;
-//typedef BarrierQueue::iterator BarrierQueueIterator;
-
 class BarrierData
 {
 public:
-	VectorClock* vectorClock;
-	VectorClock* previousVectorClock;
+	VectorClock vectorClock;
+	VectorClock previousVectorClock;
 	int barrierSize;
 	int waiterCount;
 
 	BarrierData(int barrierSize)
 	{
-		vectorClock = new VectorClock();
-		previousVectorClock = NULL;
 		this->barrierSize = barrierSize;
 		waiterCount = 0;
 	}
 
 	BarrierData()
 	{
-		vectorClock = new VectorClock();
-		previousVectorClock = NULL;
 		barrierSize = 0;
 		waiterCount = 0;
-	}
-
-	~BarrierData()
-	{
-		if (vectorClock)
-			delete vectorClock;
-		if (previousVectorClock)
-			delete previousVectorClock;
 	}
 };
 
@@ -164,12 +153,6 @@ public:
 			return;
 		}
 
-		// TODO remove here
-		// printf("READ of %d\n", sigRaceData->tid);
-		// sigRaceData->r.print(stdout);
-		// printf("WRITE of %d\n", sigRaceData->tid);
-		// sigRaceData->w.print(stdout);
-
 		// add it to the queue
 		BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
 		queue->push_front(sigRaceData);
@@ -204,10 +187,12 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+#ifdef DEBUG_MODE
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
+#endif
 					fflush(stderr);
 
 					goto OUTER_FOR;
@@ -217,10 +202,12 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+#ifdef DEBUG_MODE
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
+#endif
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
@@ -229,10 +216,12 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
+#ifdef DEBUG_MODE
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
+#endif
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
@@ -244,6 +233,7 @@ public:
 	void addProcessor()
 	{
 		threadCount++;
+		assert(threadCount < MAX_VC_SIZE);
 		blockHistoryQueues.push_back(new BlockHistoryQueue);
 	}
 

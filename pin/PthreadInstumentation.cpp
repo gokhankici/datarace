@@ -54,20 +54,22 @@ static void printSignatures()
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
 	assert(tid < MAX_VC_SIZE);
+
+	GetLock(&threadIdMapLock, tid + 1);
+
 	PrintRecordInfo(tid, CREATE);
 
-	GetLock(&lock, tid + 1);
-	++globalId;
 	rdm.addProcessor();
-	ReleaseLock(&lock);
 
 	ThreadLocalStorage* tls = new ThreadLocalStorage();
 	tls->readBloomFilter = new Bloom();
 	tls->writeBloomFilter = new Bloom();
 
-	/* Find the parent and acquire the vector clock info from it */
-
-	GetLock(&threadIdMapLock, tid + 1);
+	string filename = KnobOutputFile.Value() + "." + decstr(tid);
+	FILE* out = fopen(filename.c_str(), "w");
+//	fprintf(out, "PIN_TID:%d OS_TID:0x%x\n", tid, PIN_GetTid());
+//	fflush(out);
+	tls->out = out;
 
 	// put my OS-ThreadId / PIN-ThreadId mapping
 	threadIdMap[PIN_GetTid()] = tid;
@@ -81,6 +83,21 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		assert(parentTidItr != threadIdMap.end());
 		THREADID parentTID = parentTidItr->second;
 
+		if (lastParent == parentTID)
+		{
+			createdThreadCount++;
+		}
+		else
+		{
+			if (createdThreadCount)
+			{
+				fprintf(createFile, "%u %d\n", lastParent, createdThreadCount);
+			}
+
+			lastParent = parentTID;
+			createdThreadCount = 1;
+		}
+
 		// get its vector clock
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
 
@@ -90,12 +107,12 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		Bloom* parentWrite = parentTls->writeBloomFilter;
 
 		// add parent's read/write info to the module
-		GetLock(&lock, tid + 1);
+		GetLock(&rdmLock, tid + 1);
 		tls->vectorClock = new VectorClock(*parentVC, (int) tid);
 
-		// add current signature to the rdm
 		printSignatures(parentTID);
 
+		// add current signature to the rdm
 		rdm.addSignature(
 				new SigRaceData(parentTID, *parentVC, *parentRead,
 						*parentWrite));
@@ -108,7 +125,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		parentRead->clear();
 		parentWrite->clear();
 
-		ReleaseLock(&lock);
+		ReleaseLock(&rdmLock);
 	}
 	else
 	{
@@ -118,11 +135,6 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	ReleaseLock(&threadIdMapLock);
 
 	// create the log file
-	string filename = KnobOutputFile.Value() + "." + decstr(tid);
-	FILE* out = fopen(filename.c_str(), "w");
-	fprintf(out, "PIN_TID:%d OS_TID:0x%x\n", tid, PIN_GetTid());
-	fflush(out);
-	tls->out = out;
 
 	PIN_SetThreadData(tlsKey, tls, tid);
 }
@@ -139,11 +151,11 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 	printSignatures();
 	rdm.addSignature(
 			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	vectorClock->advance();
 
@@ -160,6 +172,15 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		assert(parentTidItr != threadIdMap.end());
 		THREADID parentTID = parentTidItr->second;
 
+		if (createdThreadCount)
+		{
+			fprintf(createFile, "%u %d\n", lastParent, createdThreadCount);
+			fflush(createFile);
+
+			lastParent = 0;
+			createdThreadCount = 0;
+		}
+
 		// get its vector clock
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
 
@@ -168,7 +189,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		Bloom* parentRead = parentTls->readBloomFilter;
 		Bloom* parentWrite = parentTls->writeBloomFilter;
 
-		GetLock(&lock, tid + 1);
+		GetLock(&rdmLock, tid + 1);
 
 		// save parent's current situation
 		printSignatures(parentTID);
@@ -187,7 +208,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		parentRead->clear();
 		parentWrite->clear();
 
-		ReleaseLock(&lock);
+		ReleaseLock(&rdmLock);
 	}
 
 	ReleaseLock(&threadIdMapLock);
@@ -195,42 +216,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	fclose(out);
 	delete tls;
 
-	// FIXME: move this to the start of the re-execution step
-	GetLock(&createLock, tid + 1);
-	if (createdThreadCount)
-	{
-		fprintf(createFile, "%u %d", lastParent, createdThreadCount);
-		fflush(createFile);
-
-		lastParent = 0;
-		createdThreadCount = 0;
-	}
-	ReleaseLock(&createLock);
-
 	PIN_SetThreadData(tlsKey, 0, tid);
-}
-
-VOID BeforeCreate(THREADID parent_tid, pthread_t *thread,
-		const pthread_attr_t *attr, void *(*start_routine)(void *), void *arg)
-{
-	GetLock(&createLock, parent_tid + 1);
-
-	if (lastParent == parent_tid)
-	{
-		createdThreadCount++;
-	}
-	else
-	{
-		if (createdThreadCount)
-		{
-			fprintf(createFile, "%u %d\n", lastParent, createdThreadCount);
-		}
-
-		lastParent = parent_tid;
-		createdThreadCount = 1;
-	}
-
-	ReleaseLock(&createLock);
 }
 
 // This routine is executed each time lock is called.
@@ -262,7 +248,7 @@ VOID AfterLock(THREADID tid)
 	fflush(stdout);
 #endif
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 
 	printSignatures();
 	// add signature to the rdm
@@ -291,7 +277,7 @@ VOID AfterLock(THREADID tid)
 		stiItr->second.tid = NO_ID;
 	}
 
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	readFilter->clear();
 	writeFilter->clear();
@@ -326,7 +312,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	fflush(stdout);
 #endif
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 
 	printSignatures();
 	// add current signature to the rdm
@@ -342,7 +328,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	// update the unlocked map with my vector clock
 	(*unlockedThreadMap)[lockAddr].update(tid, *vectorClock);
 
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	readFilter->clear();
 	writeFilter->clear();
@@ -373,7 +359,7 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 	fflush(stdout);
 #endif
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 
 	printSignatures();
 	// add current signature to the rdm
@@ -389,7 +375,7 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 	// update the unlocked map with my vector clock
 	(*unlockedThreadMap)[lockAddr].update(tid, *vectorClock);
 
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	readFilter->clear();
 	writeFilter->clear();
@@ -420,7 +406,7 @@ VOID AfterCondWait(THREADID tid)
 	fflush(stdout);
 #endif
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 
 #ifdef PRINT_SYNC_FUNCTION
 	fprintf(out, "--- COND WAKE UP ---\n");
@@ -439,13 +425,13 @@ VOID AfterCondWait(THREADID tid)
 		}
 	}
 
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	readFilter->clear();
 	writeFilter->clear();
 }
 
-VOID BarrierInit(THREADID tid, ADDRINT barrier, int size)
+VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, int size)
 {
 	GetLock(&barrierLock, tid + 1);
 
@@ -515,14 +501,14 @@ VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
 #endif
 
 	// update the shared vector clock between waiting threads
-	barrierData->vectorClock->set(tid, tls->vectorClock->get());
+	barrierData->vectorClock.receiveAction(*(tls->vectorClock));
 
 	if (++(barrierData->waiterCount) == barrierData->barrierSize)
 	{
 		// if this is the last thread, handle the bookkeeping
 		barrierData->waiterCount = 0;
 		barrierData->previousVectorClock = barrierData->vectorClock;
-		barrierData->vectorClock->clear();
+		barrierData->vectorClock.clear();
 	}
 
 	ReleaseLock(&barrierLock);
@@ -556,7 +542,7 @@ VOID AfterBarrierWait(int returnCode, THREADID tid)
 	}
 	assert(barrierData != NULL);
 
-	tls->vectorClock->receiveAction(*(barrierData->previousVectorClock));
+	tls->vectorClock->receiveAction(barrierData->previousVectorClock);
 
 #ifdef DEBUG_MODE
 	printf("%d is exiting after the barrier %ld\n", tid, barrierAddr);
@@ -589,7 +575,7 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 	fflush(stdout);
 #endif
 
-	GetLock(&lock, tid + 1);
+	GetLock(&rdmLock, tid + 1);
 
 	printSignatures();
 	// add current signature to the rdm
@@ -605,7 +591,7 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 
 	(*notifiedThreadMap)[condVarAddr].update(tid, *vectorClock);
 
-	ReleaseLock(&lock);
+	ReleaseLock(&rdmLock);
 
 	readFilter->clear();
 	writeFilter->clear();
@@ -713,14 +699,13 @@ VOID ImageLoad(IMG img, VOID *)
 		RTN_Close(rtn);
 	}
 
-	rtn = RTN_FindByName(img, "pthread_create");
+	rtn = RTN_FindByName(img, "pthread_barrier_init");
 	if (RTN_Valid(rtn))
 	{
 		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCreate),
+		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeBarrierInit),
 				IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 1, IARG_FUNCARG_ENTRYPOINT_VALUE,
-				2, IARG_FUNCARG_ENTRYPOINT_VALUE, 3, IARG_END);
+				IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
 		RTN_Close(rtn);
 	}
 }

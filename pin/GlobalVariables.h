@@ -6,14 +6,13 @@
 
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
 #define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
-#define MAX_VC_SIZE 32
 
-#define DEBUG_MODE
+// when enabled, print the debugging messages to the screen
+//#define DEBUG_MODE
 
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
 
-// <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 extern TLS_KEY tlsKey;
 
 class ThreadLocalStorage
@@ -30,8 +29,6 @@ public:
 	ADDRINT nextMallocSize;
 	ADDRINT nextReallocAddr;
 	ADDRINT nextReallocSize;
-	//pthread_t* createdThread;
-	//pthread_t joinedThread;
 
 	ThreadLocalStorage()
 	{
@@ -46,8 +43,6 @@ public:
 		nextMallocSize = 0;
 		nextReallocAddr = 0;
 		nextReallocSize = 0;
-		//createdThread = NULL;
-		//joinedThread = NULL;
 	}
 
 	~ThreadLocalStorage()
@@ -57,11 +52,5 @@ public:
 		delete writeBloomFilter;
 	}
 };
-// >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
-
-// <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
-extern UINT32 globalId;
-extern PIN_LOCK lock;
-// >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 #endif

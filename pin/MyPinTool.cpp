@@ -68,8 +68,7 @@ TLS_KEY tlsKey;
 // >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
 
 // <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
-UINT32 globalId = 0;
-PIN_LOCK lock;
+PIN_LOCK rdmLock;
 
 //WaitQueueMap* waitQueueMap;
 UnlockThreadMap* unlockedThreadMap;
@@ -97,7 +96,6 @@ FILE* raceInfoFile = NULL;
 THREADID lastParent = 0;
 int createdThreadCount = 0;
 FILE* createFile;
-PIN_LOCK createLock;
 
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
@@ -107,10 +105,6 @@ INT32 usage()
 	cerr << KNOB_BASE::StringKnobSummary();
 	cerr << endl;
 	return -1;
-}
-
-VOID Fini(INT32 code, VOID *v)
-{
 }
 
 /* ===================================================================== */
@@ -127,11 +121,10 @@ int main(INT32 argc, CHAR **argv)
 
 	InitLock(&fileLock);
 	InitLock(&mccLock);
-	InitLock(&lock);
+	InitLock(&rdmLock);
 	InitLock(&threadIdMapLock);
 	InitLock(&barrierLock);
 	InitLock(&memorySetLock);
-	InitLock(&createLock);
 	InitLock(&recordLock);
 
 	recordFile = fopen("record.txt", "w");
@@ -222,8 +215,6 @@ int main(INT32 argc, CHAR **argv)
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
-
-	PIN_AddFiniFunction(Fini, 0);
 
 	// Never returns
 	PIN_StartProgram();

@@ -10,7 +10,9 @@
 #define DEFAULT_BLOOM_FILTER_SIZE 2048
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
-#define SET_OVERRIDE
+
+// when defined, replace the bloom filter with a std::set
+//#define SET_OVERRIDE
 
 typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
@@ -36,10 +38,12 @@ public:
 	{
 		return filter;
 	}
+
 	int getFilterSize()
 	{
 		return filterSize;
 	}
+
 	int getFilterSizeInBytes()
 	{
 		return (filterSize + 7) / 8;
