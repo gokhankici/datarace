@@ -26,10 +26,10 @@ KNOB<string> KnobCreateFile(KNOB_MODE_WRITEONCE, "pintool", "createFile",
 
 INT32 Usage()
 {
-    cerr << "This tool replays a multithread program." << endl;
-    cerr << KNOB_BASE::StringKnobSummary();
-    cerr << endl;
-    return 1;
+	cerr << "This tool replays a multithread program." << endl;
+	cerr << KNOB_BASE::StringKnobSummary();
+	cerr << endl;
+	return 1;
 }
 
 typedef pair<UINT32, pair<UINT32, SIZE> > RECORD_PAIR;
@@ -38,177 +38,145 @@ const UINT32 SLEEP_TIME = 10;
 
 BOOL enable_tool = false;
 
+PIN_LOCK vector_lock;
+PIN_LOCK mutex_map_lock;
+PIN_LOCK cond_map_lock;
+PIN_LOCK barrier_map_lock;
+PIN_LOCK id_lock;
+PIN_LOCK index_lock;
+PIN_LOCK out_lock;
+PIN_LOCK atomic_create;
+
 VectorClock current_vc[MAX_THREAD_COUNT];
-pthread_mutex_t vector_lock = PTHREAD_MUTEX_INITIALIZER;
-
-map<pthread_mutex_t*,
-VectorClock> mutex_map;
-pthread_mutex_t mutex_map_lock = PTHREAD_MUTEX_INITIALIZER;
-
-map<pthread_cond_t*,
-VectorClock> cond_map;
-pthread_mutex_t cond_map_lock = PTHREAD_MUTEX_INITIALIZER;
-
-map<pthread_barrier_t*,
-deque<VectorClock>* > barrier_map;
-pthread_mutex_t barrier_map_lock = PTHREAD_MUTEX_INITIALIZER;
-
 UINT32 global_id = 0;
-map < pthread_t,
-UINT32> id_map;
-pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
-
 UINT32 global_index = 0;
-pthread_mutex_t index_lock = PTHREAD_MUTEX_INITIALIZER;
+
+map<pthread_mutex_t*, VectorClock> mutex_map;
+map<pthread_cond_t*, VectorClock> cond_map;
+map<pthread_barrier_t*, deque<VectorClock>* > barrier_map;
 vector<RECORD_PAIR> index_queue;
-
-pthread_mutex_t out_lock = PTHREAD_MUTEX_INITIALIZER;
 vector<RECORD_PAIR> record_vector;
-
-pthread_mutex_t atomic_create = PTHREAD_MUTEX_INITIALIZER;
 
 /* MY ADDITIONS */
 ThreadCreateOrder threadCreateOrder;
 ThreadCreateOrderItr currentCreateOrder;
 /* MY ADDITIONS */
 
-/* PROBE FUNCTION POINTERS */
-pthread_t (*FPTHREAD_SELF)(void);
-int (*FPTHREAD_CREATE)(pthread_t *__restrict,
-                       __const pthread_attr_t *__restrict, void *(*)(void *),
-                       void *__restrict);
-int (*FPTHREAD_MUTEX_LOCK)(pthread_mutex_t *);
-int (*FPTHREAD_MUTEX_UNLOCK)(pthread_mutex_t *);
-int (*FPTHREAD_COND_WAIT)(pthread_cond_t *__restrict,
-                          pthread_mutex_t *__restrict);
-int (*FPTHREAD_COND_SIGNAL)(pthread_cond_t *);
-int (*FPTHREAD_COND_BROADCAST)(pthread_cond_t *);
-int (*FPTHREAD_BARRIER_WAIT)(pthread_barrier_t *);
-int (*FMAIN)(int, char**);
-
-pthread_t mypthread_self(void)
-{
-    return FPTHREAD_SELF();
-}
-
+/*
 inline void getmyid(UINT32*newid)
 {
-    const pthread_t myid = mypthread_self();
+	const pthread_t myid = mypthread_self();
 
-    FPTHREAD_MUTEX_LOCK(&id_lock);
-    UINT32 mytid = 0;
-    map<pthread_t, UINT32>::iterator itr;
-    if (global_id == 0)
-    {
-        if ((itr = id_map.find(myid)) == id_map.end())
-        {
-            id_map[myid] = 0;
-            mytid = 0;
-        }
-        else
-        {
-            mytid = itr->second;
-        }
-        (*newid) = mytid;
-    }
-    else
-    {
-        while ((itr = id_map.find(myid)) == id_map.end())
-        {
-            FPTHREAD_MUTEX_UNLOCK(&id_lock);
-            PIN_Sleep(SLEEP_TIME);
-            FPTHREAD_MUTEX_LOCK(&id_lock);
-        }
+	FPTHREAD_MUTEX_LOCK(&id_lock);
+	UINT32 mytid = 0;
+	map<pthread_t, UINT32>::iterator itr;
+	if (global_id == 0)
+	{
+		if ((itr = id_map.find(myid)) == id_map.end())
+		{
+			id_map[myid] = 0;
+			mytid = 0;
+		}
+		else
+		{
+			mytid = itr->second;
+		}
+		(*newid) = mytid;
+	}
+	else
+	{
+		while ((itr = id_map.find(myid)) == id_map.end())
+		{
+			FPTHREAD_MUTEX_UNLOCK(&id_lock);
+			PIN_Sleep(SLEEP_TIME);
+			FPTHREAD_MUTEX_LOCK(&id_lock);
+		}
 
-        mytid = itr->second;
-        (*newid) = mytid;
-    }
+		mytid = itr->second;
+		(*newid) = mytid;
+	}
 
-    FPTHREAD_MUTEX_UNLOCK(&id_lock);
+	FPTHREAD_MUTEX_UNLOCK(&id_lock);
 }
 
 //will have index_lock when returned
 inline void waitTurn(const UINT32 mytid)
 {
-    pair<UINT32, SIZE> temp_pair;
-    while (true)
-    {
-        FPTHREAD_MUTEX_LOCK(&index_lock);
-        temp_pair = (index_queue.at(global_index)).second;
-        if (temp_pair.first == mytid)
-            break;
-        else
-        {
-            FPTHREAD_MUTEX_UNLOCK(&index_lock);
-            PIN_Sleep(SLEEP_TIME);
-        }
-    }
+	pair<UINT32, SIZE> temp_pair;
+	while (true)
+	{
+		FPTHREAD_MUTEX_LOCK(&index_lock);
+		temp_pair = (index_queue.at(global_index)).second;
+		if (temp_pair.first == mytid)
+			break;
+		else
+		{
+			FPTHREAD_MUTEX_UNLOCK(&index_lock);
+			PIN_Sleep(SLEEP_TIME);
+		}
+	}
 }
 
 inline UINT32 getCurrentEventAndAdvance()
 {
-    FPTHREAD_MUTEX_LOCK(&index_lock);
-    UINT32 ts = global_index;
-    ++global_index;
-    FPTHREAD_MUTEX_UNLOCK(&index_lock);
-    return ts;
+	FPTHREAD_MUTEX_LOCK(&index_lock);
+	UINT32 ts = global_index;
+	++global_index;
+	FPTHREAD_MUTEX_UNLOCK(&index_lock);
+	return ts;
 }
 
 inline void addToVector(const UINT32 global_index, const UINT32 mytid,
                         const SIZE op)
 {
-    RECORD_PAIR r;
-    r.first = global_index;
-    r.second.first = mytid;
-    r.second.second = op;
-    FPTHREAD_MUTEX_LOCK(&out_lock);
-    record_vector.push_back(r);
-    FPTHREAD_MUTEX_UNLOCK(&out_lock);
+	RECORD_PAIR r;
+	r.first = global_index;
+	r.second.first = mytid;
+	r.second.second = op;
+	FPTHREAD_MUTEX_LOCK(&out_lock);
+	record_vector.push_back(r);
+	FPTHREAD_MUTEX_UNLOCK(&out_lock);
 }
+*/
 
-void logToFile(const char * name, const vector<RECORD_PAIR> & v,
-               pthread_mutex_t*mutex)
+void logToFile(const char * name, const vector<RECORD_PAIR> & v, THREADID tid, PIN_LOCK* lock)
 {
-    RECORD_PAIR r;
-    ofstream OutFile(name, ofstream::out | ofstream::trunc);
-    FPTHREAD_MUTEX_LOCK(mutex);
-    int len = v.size();
-    OutFile << len << '\n';
-    for (int i = 0; i < len; i++)
-    {
-        r = v.at(i);
-        OutFile << r.first << ' ' << r.second.first << ' ' << r.second.second
-        << '\n';
-    }
-    FPTHREAD_MUTEX_UNLOCK(mutex);
-    OutFile.close();
+	RECORD_PAIR r;
+	ofstream OutFile(name, ofstream::out | ofstream::trunc);
+	GetLock(lock, tid + 1);
+	int len = v.size();
+	OutFile << len << '\n';
+	for (int i = 0; i < len; i++)
+	{
+		r = v.at(i);
+		OutFile << r.first << ' ' << r.second.first << ' ' << r.second.second
+		<< '\n';
+	}
+	ReleaseLock(lock);
+	OutFile.close();
 
 }
 
+/*
 inline void record(const UINT32 mytid, const SIZE op)
 {
-    UINT32 ts = getCurrentEventAndAdvance();
-    addToVector(ts, mytid, op);
+	UINT32 ts = getCurrentEventAndAdvance();
+	addToVector(ts, mytid, op);
 }
 
 //will have index_lock when returned
 inline void replay(const UINT32 mytid, const SIZE op)
 {
-    waitTurn(mytid);
-    addToVector(global_index, mytid, op);
-    ++global_index;
+	waitTurn(mytid);
+	addToVector(global_index, mytid, op);
+	++global_index;
 }
 
-typedef struct
-{
-    UINT32 parentid;
-    void * arg;
-    void*(*fnc)(void*);
-}
-create_argument;
 
 void* thread_function(void* arg)
 {
+    puts("IN threaed_function YE-HOOO!\n");
+
     UINT32 mytid;
     getmyid(&mytid);
 
@@ -235,62 +203,45 @@ void* thread_function(void* arg)
 
     return res;
 }
+*/
 
-int mypthread_create(pthread_t *__restrict __newthread,
-                     __const pthread_attr_t *__restrict __attr,
-                     void *(*__start_routine)(void *), void *__restrict __arg)
+VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
+                  __const pthread_attr_t *__restrict __attr,
+                  void *(*__start_routine)(void *), void *__restrict __arg)
 {
-    puts("create yapiyorum\n");
+	if (!enable_tool)
+		return;
 
-    if (!enable_tool)
-        return FPTHREAD_CREATE(__newthread, __attr, __start_routine, __arg);
+	//this is slighly different than others
+	pair<UINT32, SIZE> temp_pair;
 
-    UINT32 mytid;
-    getmyid(&mytid);
+	while (true)
+	{
+		GetLock(&atomic_create, tid + 1);
+		GetLock(&index_lock, tid + 1);
 
-    int res = 0;
+		CreateInfo ci = *currentCreateOrder;
 
-    //this is slighly different than others
-    pair<UINT32, SIZE> temp_pair;
+		if (tid == ci.parent)
+			break;
+		else
+		{
+			ReleaseLock(&index_lock);
+			ReleaseLock(&atomic_create);
+			PIN_Sleep(SLEEP_TIME);
+		}
+	}
 
-    while (true)
-    {
-        FPTHREAD_MUTEX_LOCK(&atomic_create);
-        FPTHREAD_MUTEX_LOCK(&index_lock);
-
-        CreateInfo ci = *currentCreateOrder;
-
-        if (ci.parent == mytid)
-            break;
-        else
-        {
-            FPTHREAD_MUTEX_UNLOCK(&index_lock);
-            FPTHREAD_MUTEX_UNLOCK(&atomic_create);
-            PIN_Sleep(SLEEP_TIME);
-        }
-    }
-    addToVector(global_index, mytid, 0);
-
-    ++global_index;
-    FPTHREAD_MUTEX_UNLOCK(&index_lock);
-
-    create_argument * carg = (create_argument*) malloc(sizeof(create_argument));
-    carg->arg = __arg;
-    carg->fnc = __start_routine;
-    carg->parentid = mytid;
-
-    res = FPTHREAD_CREATE(__newthread, __attr, thread_function, (void*) carg);
-
-    FPTHREAD_MUTEX_LOCK(&id_lock);
-    id_map[*__newthread] = ++global_id;
-    FPTHREAD_MUTEX_UNLOCK(&id_lock);
-
-    currentCreateOrder++;
-    FPTHREAD_MUTEX_UNLOCK(&atomic_create);
-
-    return res;
+	ReleaseLock(&index_lock);
 }
 
+VOID AfterCreate(THREADID tid, int rc)
+{
+	currentCreateOrder++;
+	ReleaseLock(&atomic_create);
+}
+
+/*
 int mypthread_mutex_lock(pthread_mutex_t * __mutex)
 {
     if (!enable_tool)
@@ -573,121 +524,170 @@ int mypthread_barrier_wait(pthread_barrier_t * __barrier)
 
     return res;
 }
+*/
 
-int mymain(int argc, char ** argv)
+VOID BeforeMain(THREADID tid, int argc, char ** argv)
 {
-    if (KnobMode.Value() == "replay")
-    {
-        RECORD_PAIR file_record;
-        ifstream ifs(KnobOutputFile.Value().c_str(), ifstream::in);
-        int record_count;
-        ifs >> record_count;
-        for (int i = 0; i < record_count; i++)
-        {
-            ifs >> file_record.first >> file_record.second.first
-            >> file_record.second.second;
-            index_queue.push_back(file_record);
-        }
-        ifs.close();
-        sort(index_queue.begin(), index_queue.end());
+	if (KnobMode.Value() == "replay")
+	{
+		RECORD_PAIR file_record;
+		ifstream ifs(KnobOutputFile.Value().c_str(), ifstream::in);
+		int record_count;
+		ifs >> record_count;
+		for (int i = 0; i < record_count; i++)
+		{
+			ifs >> file_record.first >> file_record.second.first
+			>> file_record.second.second;
+			index_queue.push_back(file_record);
+		}
+		ifs.close();
+		sort(index_queue.begin(), index_queue.end());
 
-        logToFile("c", index_queue, &index_lock);
-    }
+		logToFile("c", index_queue, tid, &index_lock);
+	}
 
-    //assign main thread vector clock
-    current_vc[0].threadId = 0;
-    current_vc[0].tick();
+	//assign main thread vector clock
+	current_vc[0].threadId = 0;
+	current_vc[0].tick();
 
-    /* MY ADDITIONS */
-    puts("MAYINdayim\n");
-    FILE* createFile = fopen(KnobCreateFile.Value().c_str(), "r");
-    THREADID tid, parent;
-    int readCount;
-    while (!feof(createFile))
-    {
-        readCount = fscanf(createFile, "%d %d\n", &tid, &parent);
-        if (readCount != 2)
-        {
-            fprintf(stderr, "error occured while reading from create file %s\n",
-                    KnobCreateFile.Value().c_str());
-            exit(1);
-        }
-        threadCreateOrder.push_back(CreateInfo(tid, parent));
-    }
-    currentCreateOrder  = threadCreateOrder.begin();
-    /* MY ADDITIONS */
+	/* MY ADDITIONS */
+	puts("MAYINdayim\n");
+	FILE* createFile = fopen(KnobCreateFile.Value().c_str(), "r");
 
-    enable_tool = true;
+	THREADID created, parent;
+	int readCount;
 
-    // start main
-    int res = FMAIN(argc, argv);
+	while (!feof(createFile))
+	{
+		readCount = fscanf(createFile, "%d %d\n", &created, &parent);
+		if (readCount != 2)
+		{
+			fprintf(stderr, "error occured while reading from create file %s\n",
+			        KnobCreateFile.Value().c_str());
+			exit(1);
+		}
+		threadCreateOrder.push_back(CreateInfo(created, parent));
+	}
+	currentCreateOrder  = threadCreateOrder.begin();
+	/* MY ADDITIONS */
 
-    enable_tool = false;
-    if (KnobMode.Value() == "record")
-        logToFile(KnobOutputFile.Value().c_str(), record_vector, &out_lock);
-    else if (KnobMode.Value() == "replay")
-        logToFile("d", record_vector, &out_lock);
-
-    return res;
+	enable_tool = true;
 }
+
+// used to define the point of instrumentation
+#define INSTRUMENT_BEFORE 1
+#define INSTRUMENT_AFTER  2
+#define INSTRUMENT_BOTH   (INSTRUMENT_BEFORE | INSTRUMENT_AFTER)
 
 /* ===================================================================== */
 /* Instrumnetation functions                                             */
 /* ===================================================================== */
-inline AFUNPTR probeFunction(IMG img, const char * name, AFUNPTR funptr)
-{
-    RTN rtn = RTN_FindByName(img, name);
-    //	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
-    if (RTN_Valid(rtn))
-    {
-        //		return (RTN_ReplaceProbed(rtn, funptr));
-        return (RTN_Replace(rtn, funptr));
-    }
 
-    return NULL;
+/*
+ * Used to add instrumentation routines before and/or after a function.
+ *
+ * THREADID & all parameters are passed to the before routines.
+ * THREADID & exit value are passed to the after routines.
+ *
+ * funptr:         function to add instrumentation
+ * position:       before, after or both
+ * parameterCount: # parameters to pass to the before instrumentation function
+ *
+ */
+VOID
+addInstrumentation(IMG img, const char * name, char position, int parameterCount, AFUNPTR beforeFUNPTR, AFUNPTR afterFUNPTR)
+{
+	RTN rtn = RTN_FindByName(img, name);
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+
+		if(position & INSTRUMENT_BEFORE)
+		{
+			assert(beforeFUNPTR);
+
+			switch(parameterCount)
+			{
+			case 1:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_END);
+				break;
+			case 2:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_END);
+				break;
+			case 3:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
+				               IARG_END);
+				break;
+			case 4:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 3,
+				               IARG_END);
+				break;
+			default:
+				fprintf(stderr, "Instrumentation for functions with %d arguments are not implemented yet\n", parameterCount);
+				exit(1);
+			}
+		}
+
+		if(position & INSTRUMENT_AFTER)
+		{
+			assert(afterFUNPTR);
+
+			RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(afterFUNPTR),
+			               IARG_THREAD_ID,
+			               IARG_FUNCRET_EXITPOINT_VALUE,
+			               IARG_END);
+		}
+
+		RTN_Close(rtn);
+	}
 }
 
-inline AFUNPTR probeFunctionByAddress(ADDRINT addr, AFUNPTR funptr)
+VOID BeforeKare(THREADID tid, int x)
 {
-    RTN rtn = RTN_FindByAddress(addr);
-    //	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
-    if (RTN_Valid(rtn))
-    {
-        //		return (RTN_ReplaceProbed(rtn, funptr));
-        return (RTN_Replace(rtn, funptr));
-    }
+	printf("kare(%d) function'in dasin !!!\n", x);
+}
 
-    return NULL;
+VOID AfterKare(THREADID tid, int rc)
+{
+	printf("kare(...) = %d\n", rc);
 }
 
 // Image load callback - inserts the probes.
 void ImgLoad(IMG img, void *v)
 {
-    if ((IMG_Name(img).find("libpthread.so") != string::npos)
-            || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
-            || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
-    {
-        puts("pthread'leri replace ediyorum...");
-        FPTHREAD_SELF           = (pthread_t (*)(void))probeFunction(img,"pthread_self",AFUNPTR(mypthread_self));
-        FPTHREAD_CREATE		    = (int (*)(pthread_t *__restrict, __const pthread_attr_t *__restrict, void *(*)(void *),void *__restrict))
-                               probeFunction(img, "pthread_create",AFUNPTR(mypthread_create));
-        if(FPTHREAD_CREATE == NULL)
-        {
-            fprintf(stderr, "create'i wrap edemedi\n");
-            exit(1);
-        }
-        FPTHREAD_MUTEX_LOCK     = (int (*)(pthread_mutex_t *)) probeFunction(img, "pthread_mutex_lock",AFUNPTR(mypthread_mutex_lock));
-        FPTHREAD_COND_WAIT      = (int (*)(pthread_cond_t *__restrict,pthread_mutex_t *__restrict)) probeFunction(img,"pthread_cond_wait",AFUNPTR(mypthread_cond_wait));
-        FPTHREAD_COND_BROADCAST = (int (*)(pthread_cond_t *)) probeFunction(img,"pthread_cond_broadcast",AFUNPTR(mypthread_cond_broadcast));
-        FPTHREAD_MUTEX_UNLOCK   = (int (*)(pthread_mutex_t *)) probeFunction(img,"pthread_mutex_unlock",AFUNPTR(mypthread_mutex_unlock));
-        FPTHREAD_BARRIER_WAIT   = (int (*)(pthread_barrier_t * )) probeFunction(img,"pthread_barrier_wait",AFUNPTR(mypthread_barrier_wait));
+	if ((IMG_Name(img).find("libpthread.so") != string::npos)
+	        || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
+	        || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
+	{
+		addInstrumentation(img, "pthread_create", INSTRUMENT_BOTH, 4, AFUNPTR(BeforeCreate), AFUNPTR(AfterCreate));
+	}
 
-    }
+	if(IMG_IsMainExecutable(img))
+	{
+		addInstrumentation(img, "main", INSTRUMENT_BEFORE, 2, AFUNPTR(BeforeMain), NULL);
+		addInstrumentation(img, "kare", INSTRUMENT_BOTH, 1, AFUNPTR(BeforeKare), AFUNPTR(AfterKare));
+	}
+}
 
-    if(IMG_IsMainExecutable(img))
-    {
-        FMAIN=(int(*)(int,char**))probeFunction(img,"main",AFUNPTR(mymain));
-    }
+VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
+{
+	printf("Thread %d is started\n", tid);
 }
 
 /* ===================================================================== */
@@ -696,19 +696,27 @@ void ImgLoad(IMG img, void *v)
 
 int main(int argc, char *argv[])
 {
-    // Initialize Pin
-    PIN_InitSymbols();
-    if (PIN_Init(argc, argv))
-    {
-        return Usage();
-    }
+	// Initialize Pin
+	PIN_InitSymbols();
+	if (PIN_Init(argc, argv))
+	{
+		return Usage();
+	}
 
-    // Register the instrumentation callback
-    IMG_AddInstrumentFunction(ImgLoad, 0);
+	InitLock(&vector_lock);
+	InitLock(&mutex_map_lock);
+	InitLock(&cond_map_lock);
+	InitLock(&barrier_map_lock);
+	InitLock(&id_lock);
+	InitLock(&index_lock);
+	InitLock(&out_lock);
+	InitLock(&atomic_create);
 
-    // Start the application
-    //	PIN_StartProgramProbed(); // never returns
-    PIN_StartProgram(); // never returns
-    return 0;
+	// Register the instrumentation callback
+	IMG_AddInstrumentFunction(ImgLoad, 0);
+	PIN_AddThreadStartFunction(ThreadStart, 0);
+
+	// Start the application
+	PIN_StartProgram();
+	return 0;
 }
-
