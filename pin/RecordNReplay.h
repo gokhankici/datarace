@@ -41,6 +41,13 @@ typedef vector<CreateInfo>::iterator ThreadCreateOrderItr;
 extern ThreadCreateOrder threadCreateOrder;
 extern FILE* createFile;
 
+#ifdef IN_REPLAY_TOOL
+
+typedef std::map<OS_THREAD_ID, THREADID> ThreadIdMap;
+typedef ThreadIdMap::iterator ThreadIdMapItr;
+
+#endif
+
 VOID PrintRecordInfo(THREADID tid, OperationType type);
 
 #endif /* RECORDNREPLAY_H_ */

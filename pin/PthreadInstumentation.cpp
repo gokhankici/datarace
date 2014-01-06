@@ -54,7 +54,7 @@ static void printSignatures()
  */
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	assert(tid < MAX_VC_SIZE);
+	assert(tid < MAX_THREAD_COUNT);
 
 	GetLock(&threadIdMapLock, tid + 1);
 

@@ -6,7 +6,7 @@
 #include <string.h>
 #include <assert.h>
 
-int VectorClock::totalProcessCount = MAX_VC_SIZE;
+int VectorClock::totalProcessCount = MAX_THREAD_COUNT;
 int VectorClock::totalDeletedLockCount = 0;
 
 // used for backwards compatibility purposes only

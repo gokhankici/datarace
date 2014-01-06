@@ -16,7 +16,7 @@
 
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define BLOCK_HISTORY_QUEUE_SIZE 16
-#define MAX_VC_SIZE 32
+#define MAX_THREAD_COUNT 32
 
 extern PIN_LOCK fileLock;
 extern PIN_LOCK rdmLock;
@@ -233,7 +233,7 @@ public:
 	void addProcessor()
 	{
 		threadCount++;
-		assert(threadCount < MAX_VC_SIZE);
+		assert(threadCount < MAX_THREAD_COUNT);
 		blockHistoryQueues.push_back(new BlockHistoryQueue);
 	}
 

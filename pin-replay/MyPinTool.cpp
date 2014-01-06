@@ -8,9 +8,10 @@
 #include <algorithm>
 #include "pin.H"
 #include <semaphore.h>
-#include "VectorClock.h"
 
 #include "../pin/RecordNReplay.h"
+#include "../pin/VectorClock.h"
+#include "../pin/SigraceModules.h"
 #include <assert.h>
 
 /* KNOB parameters */
@@ -60,6 +61,8 @@ vector<RECORD_PAIR> record_vector;
 /* MY ADDITIONS */
 ThreadCreateOrder threadCreateOrder;
 ThreadCreateOrderItr currentCreateOrder;
+
+ThreadIdMap threadIdMap;
 /* MY ADDITIONS */
 
 /*
@@ -548,10 +551,9 @@ VOID BeforeMain(THREADID tid, int argc, char ** argv)
 
 	//assign main thread vector clock
 	current_vc[0].threadId = 0;
-	current_vc[0].tick();
+	current_vc[0].advance();
 
 	/* MY ADDITIONS */
-	puts("MAYINdayim\n");
 	FILE* createFile = fopen(KnobCreateFile.Value().c_str(), "r");
 
 	THREADID created, parent;
@@ -687,7 +689,21 @@ void ImgLoad(IMG img, void *v)
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	printf("Thread %d is started\n", tid);
+	threadIdMap[PIN_GetTid()] = tid;
+
+	INT32 parentOS_TID = PIN_GetParentTid();
+	if (parentOS_TID)
+	{
+		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
+		assert(parentTidItr != threadIdMap.end());
+		THREADID parentTID = parentTidItr->second;
+
+		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
+	}
+	else
+	{
+		printf("Thread %d is started (root thread)\n", tid);
+	}
 }
 
 /* ===================================================================== */

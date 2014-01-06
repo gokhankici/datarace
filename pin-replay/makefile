@@ -89,6 +89,9 @@ $(OBJDIR)cp-pin.exe:
 $(OBJDIR):
 	mkdir -p $(OBJDIR)
 
+$(OBJDIR)VectorClock.o: ../pin/VectorClock.cpp
+	$(CXX) $(INC_DIRS) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
+
 $(OBJDIR)%.o : %.cpp
 	$(CXX) $(INC_DIRS) -c $(CXXFLAGS) $(PIN_CXXFLAGS) ${OUTOPT}$@ $<
 
