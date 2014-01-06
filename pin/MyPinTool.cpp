@@ -16,8 +16,8 @@
 
 /* === KNOB DEFINITIONS =================================== */
 
-KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "thread_epochs",
-		"specify output file name");
+KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o",
+		"thread_epochs", "specify output file name");
 
 KNOB<bool> KnobStopOnError(KNOB_MODE_WRITEONCE, "pintool", "stopOnProtoBug",
 		"false",
@@ -48,6 +48,9 @@ KNOB<unsigned int> KnobNumCaches(KNOB_MODE_WRITEONCE, "pintool", "numcaches",
 KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos",
 		"./MultiCacheSim-dist/MSI_SMPCache.so",
 		"Cache Coherence Protocol Modules To Simulate");
+
+KNOB<string> KnobCreateFile(KNOB_MODE_WRITEONCE, "pintool", "createFile",
+		"create.txt", "specify create file to order the thread creations");
 
 #define ON_MY_MACHINE
 
@@ -93,8 +96,7 @@ PIN_LOCK recordLock;
 FILE* recordFile = NULL;
 FILE* raceInfoFile = NULL;
 
-THREADID lastParent = 0;
-int createdThreadCount = 0;
+ThreadCreateOrder threadCreateOrder;
 FILE* createFile;
 
 // >>> Global storage >>>>>>>>>>>>>>>>>>>>>>>>>>>>
@@ -129,7 +131,7 @@ int main(INT32 argc, CHAR **argv)
 
 	recordFile = fopen("record.txt", "w");
 	raceInfoFile = fopen("race_info.txt", "w");
-	createFile = fopen("create.txt", "w");
+	createFile = fopen(KnobCreateFile.Value().c_str(), "w");
 
 	//waitQueueMap = new WaitQueueMap;
 	unlockedThreadMap = new UnlockThreadMap;
@@ -215,6 +217,8 @@ int main(INT32 argc, CHAR **argv)
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
+
+	PIN_AddFiniFunction(Fini, 0);
 
 	// Never returns
 	PIN_StartProgram();

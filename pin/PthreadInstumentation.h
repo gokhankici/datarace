@@ -59,4 +59,6 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id);
 VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id);
 VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id);
 
+VOID Fini(INT32 code, VOID *v);
+
 #endif

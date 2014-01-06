@@ -10,40 +10,29 @@
 #include <semaphore.h>
 #include "VectorClock.h"
 
+#include "../pin/RecordNReplay.h"
+#include <assert.h>
+
 /* KNOB parameters */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "output",
-		"specify output file name");
+                            "specify output file name");
 
-KNOB<string> KnobMode(KNOB_MODE_WRITEONCE, "pintool", "mode", "record",
-		"specify mode");
+KNOB<string> KnobMode(KNOB_MODE_WRITEONCE, "pintool", "mode", "replay",
+                      "specify mode");
+
+KNOB<string> KnobCreateFile(KNOB_MODE_WRITEONCE, "pintool", "createFile",
+                            "../pin/create.txt",
+                            "specify create file to order the thread creations");
 
 INT32 Usage()
 {
-	cerr << "This tool record and replay multithread program." << endl;
-	cerr << KNOB_BASE::StringKnobSummary();
-	cerr << endl;
-	return 1;
+    cerr << "This tool replays a multithread program." << endl;
+    cerr << KNOB_BASE::StringKnobSummary();
+    cerr << endl;
+    return 1;
 }
 
-typedef struct
-{
-	SIZE idx;
-	string name;
-} RECORD_TYPE;
-
-const RECORD_TYPE record_types[] =
-{
-{ 0, "pthread_create" },
-{ 1, "pthread_mutex_lock" },
-{ 2, "pthread_mutex_unlock" },
-{ 3, "pthread_cond_wait" },
-{ 4, "pthread_cond_signal" },
-{ 5, "pthread_cond_broadcast" },
-{ 6, "pthread_barrier_wait" } };
-
 typedef pair<UINT32, pair<UINT32, SIZE> > RECORD_PAIR;
-
-const SIZE RECORD_TYPE_SIZE = sizeof(record_types) / sizeof(RECORD_TYPE);
 
 const UINT32 SLEEP_TIME = 10;
 
@@ -65,9 +54,8 @@ deque<VectorClock>* > barrier_map;
 pthread_mutex_t barrier_map_lock = PTHREAD_MUTEX_INITIALIZER;
 
 UINT32 global_id = 0;
-map<pthread_t,
-UINT32
-> id_map;
+map < pthread_t,
+UINT32> id_map;
 pthread_mutex_t id_lock = PTHREAD_MUTEX_INITIALIZER;
 
 UINT32 global_index = 0;
@@ -79,15 +67,20 @@ vector<RECORD_PAIR> record_vector;
 
 pthread_mutex_t atomic_create = PTHREAD_MUTEX_INITIALIZER;
 
-/*PROBE FUNCTION POINTERS */
+/* MY ADDITIONS */
+ThreadCreateOrder threadCreateOrder;
+ThreadCreateOrderItr currentCreateOrder;
+/* MY ADDITIONS */
+
+/* PROBE FUNCTION POINTERS */
 pthread_t (*FPTHREAD_SELF)(void);
 int (*FPTHREAD_CREATE)(pthread_t *__restrict,
-		__const pthread_attr_t *__restrict, void *(*)(void *),
-		void *__restrict);
+                       __const pthread_attr_t *__restrict, void *(*)(void *),
+                       void *__restrict);
 int (*FPTHREAD_MUTEX_LOCK)(pthread_mutex_t *);
 int (*FPTHREAD_MUTEX_UNLOCK)(pthread_mutex_t *);
 int (*FPTHREAD_COND_WAIT)(pthread_cond_t *__restrict,
-		pthread_mutex_t *__restrict);
+                          pthread_mutex_t *__restrict);
 int (*FPTHREAD_COND_SIGNAL)(pthread_cond_t *);
 int (*FPTHREAD_COND_BROADCAST)(pthread_cond_t *);
 int (*FPTHREAD_BARRIER_WAIT)(pthread_barrier_t *);
@@ -95,547 +88,547 @@ int (*FMAIN)(int, char**);
 
 pthread_t mypthread_self(void)
 {
-	return FPTHREAD_SELF();
+    return FPTHREAD_SELF();
 }
 
 inline void getmyid(UINT32*newid)
 {
-	const pthread_t myid = mypthread_self();
+    const pthread_t myid = mypthread_self();
 
-	FPTHREAD_MUTEX_LOCK(&id_lock);
-	UINT32 mytid = 0;
-	map<pthread_t, UINT32>::iterator itr;
-	if (global_id == 0)
-	{
-		if ((itr = id_map.find(myid)) == id_map.end())
-		{
-			id_map[myid] = 0;
-			mytid = 0;
-		}
-		else
-		{
-			mytid = (*itr).second;
-		}
-		(*newid) = mytid;
-	}
-	else
-	{
+    FPTHREAD_MUTEX_LOCK(&id_lock);
+    UINT32 mytid = 0;
+    map<pthread_t, UINT32>::iterator itr;
+    if (global_id == 0)
+    {
+        if ((itr = id_map.find(myid)) == id_map.end())
+        {
+            id_map[myid] = 0;
+            mytid = 0;
+        }
+        else
+        {
+            mytid = itr->second;
+        }
+        (*newid) = mytid;
+    }
+    else
+    {
+        while ((itr = id_map.find(myid)) == id_map.end())
+        {
+            FPTHREAD_MUTEX_UNLOCK(&id_lock);
+            PIN_Sleep(SLEEP_TIME);
+            FPTHREAD_MUTEX_LOCK(&id_lock);
+        }
 
-		while ((itr = id_map.find(myid)) == id_map.end())
-		{
-			FPTHREAD_MUTEX_UNLOCK(&id_lock);
-			PIN_Sleep(SLEEP_TIME);
-			FPTHREAD_MUTEX_LOCK(&id_lock);
-		}
-		mytid = (*itr).second;
-		(*newid) = mytid;
-	}
+        mytid = itr->second;
+        (*newid) = mytid;
+    }
 
-	FPTHREAD_MUTEX_UNLOCK(&id_lock);
+    FPTHREAD_MUTEX_UNLOCK(&id_lock);
 }
 
 //will have index_lock when returned
 inline void waitTurn(const UINT32 mytid)
 {
-	pair<UINT32, SIZE> temp_pair;
-	while (true)
-	{
-		FPTHREAD_MUTEX_LOCK(&index_lock);
-		temp_pair = (index_queue.at(global_index)).second;
-		if (temp_pair.first == mytid)
-			break;
-		else
-		{
-			FPTHREAD_MUTEX_UNLOCK(&index_lock);
-			PIN_Sleep(SLEEP_TIME);
-		}
-	}
+    pair<UINT32, SIZE> temp_pair;
+    while (true)
+    {
+        FPTHREAD_MUTEX_LOCK(&index_lock);
+        temp_pair = (index_queue.at(global_index)).second;
+        if (temp_pair.first == mytid)
+            break;
+        else
+        {
+            FPTHREAD_MUTEX_UNLOCK(&index_lock);
+            PIN_Sleep(SLEEP_TIME);
+        }
+    }
 }
 
 inline UINT32 getCurrentEventAndAdvance()
 {
-	FPTHREAD_MUTEX_LOCK(&index_lock);
-	UINT32 ts = global_index;
-	++global_index;
-	FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	return ts;
+    FPTHREAD_MUTEX_LOCK(&index_lock);
+    UINT32 ts = global_index;
+    ++global_index;
+    FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    return ts;
 }
 
 inline void addToVector(const UINT32 global_index, const UINT32 mytid,
-		const SIZE op)
+                        const SIZE op)
 {
-	RECORD_PAIR r;
-	r.first = global_index;
-	r.second.first = mytid;
-	r.second.second = op;
-	FPTHREAD_MUTEX_LOCK(&out_lock);
-	record_vector.push_back(r);
-	FPTHREAD_MUTEX_UNLOCK(&out_lock);
+    RECORD_PAIR r;
+    r.first = global_index;
+    r.second.first = mytid;
+    r.second.second = op;
+    FPTHREAD_MUTEX_LOCK(&out_lock);
+    record_vector.push_back(r);
+    FPTHREAD_MUTEX_UNLOCK(&out_lock);
 }
 
 void logToFile(const char * name, const vector<RECORD_PAIR> & v,
-		pthread_mutex_t*mutex)
+               pthread_mutex_t*mutex)
 {
-	RECORD_PAIR r;
-	ofstream OutFile(name, ofstream::out | ofstream::trunc);
-	FPTHREAD_MUTEX_LOCK(mutex);
-	int len = v.size();
-	OutFile << len << '\n';
-	for (int i = 0; i < len; i++)
-	{
-		r = v.at(i);
-		OutFile << r.first << ' ' << r.second.first << ' ' << r.second.second
-				<< '\n';
-	}
-	FPTHREAD_MUTEX_UNLOCK(mutex);
-	OutFile.close();
+    RECORD_PAIR r;
+    ofstream OutFile(name, ofstream::out | ofstream::trunc);
+    FPTHREAD_MUTEX_LOCK(mutex);
+    int len = v.size();
+    OutFile << len << '\n';
+    for (int i = 0; i < len; i++)
+    {
+        r = v.at(i);
+        OutFile << r.first << ' ' << r.second.first << ' ' << r.second.second
+        << '\n';
+    }
+    FPTHREAD_MUTEX_UNLOCK(mutex);
+    OutFile.close();
 
 }
 
 inline void record(const UINT32 mytid, const SIZE op)
 {
-	UINT32 ts = getCurrentEventAndAdvance();
-	addToVector(ts, mytid, op);
+    UINT32 ts = getCurrentEventAndAdvance();
+    addToVector(ts, mytid, op);
 }
 
 //will have index_lock when returned
 inline void replay(const UINT32 mytid, const SIZE op)
 {
-	waitTurn(mytid);
-	addToVector(global_index, mytid, op);
-	++global_index;
+    waitTurn(mytid);
+    addToVector(global_index, mytid, op);
+    ++global_index;
 }
 
 typedef struct
 {
-	UINT32 parentid;
-	void * arg;
-	void*(*fnc)(void*);
-} create_argument;
+    UINT32 parentid;
+    void * arg;
+    void*(*fnc)(void*);
+}
+create_argument;
 
 void* thread_function(void* arg)
 {
+    UINT32 mytid;
+    getmyid(&mytid);
 
-	UINT32 mytid;
-	getmyid(&mytid);
+    create_argument * carg = (create_argument*) arg;
+    UINT32 parentid = carg->parentid;
 
-	create_argument * carg = (create_argument*) arg;
+    FPTHREAD_MUTEX_LOCK(&vector_lock);
+    current_vc[parentid].tick();
+    FPTHREAD_MUTEX_UNLOCK(&vector_lock);
 
-	UINT32 parentid = carg->parentid;
-	//assign new vector clock
-	current_vc[mytid].threadId = mytid;
-	current_vc[mytid].receiveAction(&current_vc[parentid]);
-	current_vc[mytid].tick();
+    //assign new vector clock
+    current_vc[mytid].threadId = mytid;
+    current_vc[mytid].receiveAction(&current_vc[parentid]);
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&vector_lock);
-	current_vc[parentid].tick();
-	FPTHREAD_MUTEX_UNLOCK(&vector_lock);
+    void* res = carg->fnc(carg->arg); //actual call to function
 
-	void* res = carg->fnc(carg->arg); //actual call to function
+    current_vc[mytid].tick();
 
-	current_vc[mytid].tick();
+    FPTHREAD_MUTEX_LOCK(&vector_lock);
+    current_vc[parentid].receiveAction(&current_vc[mytid]);
+    current_vc[parentid].tick();
+    FPTHREAD_MUTEX_UNLOCK(&vector_lock);
 
-	FPTHREAD_MUTEX_LOCK(&vector_lock);
-	current_vc[parentid].receiveAction(&current_vc[mytid]);
-	current_vc[parentid].tick();
-	FPTHREAD_MUTEX_UNLOCK(&vector_lock);
-
-	return res;
-
+    return res;
 }
 
 int mypthread_create(pthread_t *__restrict __newthread,
-		__const pthread_attr_t *__restrict __attr,
-		void *(*__start_routine)(void *), void *__restrict __arg)
+                     __const pthread_attr_t *__restrict __attr,
+                     void *(*__start_routine)(void *), void *__restrict __arg)
 {
-	if (!enable_tool)
-		return FPTHREAD_CREATE(__newthread, __attr, __start_routine, __arg);
+    puts("create yapiyorum\n");
 
-	UINT32 mytid;
-	getmyid(&mytid);
+    if (!enable_tool)
+        return FPTHREAD_CREATE(__newthread, __attr, __start_routine, __arg);
 
-	int res = 0;
-	if (KnobMode.Value() == "record")
-	{
-		FPTHREAD_MUTEX_LOCK(&atomic_create);
+    UINT32 mytid;
+    getmyid(&mytid);
 
-		record(mytid, 0);
+    int res = 0;
 
-		create_argument * carg = (create_argument*) malloc(
-				sizeof(create_argument));
-		carg->arg = __arg;
-		carg->fnc = __start_routine;
-		carg->parentid = mytid;
+    //this is slighly different than others
+    pair<UINT32, SIZE> temp_pair;
 
-		res = FPTHREAD_CREATE(__newthread, __attr, thread_function,
-				(void*) carg);
+    while (true)
+    {
+        FPTHREAD_MUTEX_LOCK(&atomic_create);
+        FPTHREAD_MUTEX_LOCK(&index_lock);
 
-		FPTHREAD_MUTEX_LOCK(&id_lock);
-		id_map[*__newthread] = ++global_id;
-		FPTHREAD_MUTEX_UNLOCK(&id_lock);
+        CreateInfo ci = *currentCreateOrder;
 
-		FPTHREAD_MUTEX_UNLOCK(&atomic_create);
+        if (ci.parent == mytid)
+            break;
+        else
+        {
+            FPTHREAD_MUTEX_UNLOCK(&index_lock);
+            FPTHREAD_MUTEX_UNLOCK(&atomic_create);
+            PIN_Sleep(SLEEP_TIME);
+        }
+    }
+    addToVector(global_index, mytid, 0);
 
-	}
-	else if (KnobMode.Value() == "replay")
-	{
-		//this is slighly different than others
-		pair<UINT32, SIZE> temp_pair;
+    ++global_index;
+    FPTHREAD_MUTEX_UNLOCK(&index_lock);
 
-		while (true)
-		{
-			FPTHREAD_MUTEX_LOCK(&atomic_create);
-			FPTHREAD_MUTEX_LOCK(&index_lock);
-			temp_pair = (index_queue.at(global_index)).second;
-			if (temp_pair.first == mytid)
-				break;
-			else
-			{
-				FPTHREAD_MUTEX_UNLOCK(&index_lock);
-				FPTHREAD_MUTEX_UNLOCK(&atomic_create);
-				PIN_Sleep(SLEEP_TIME);
-			}
-		}
-		addToVector(global_index, mytid, 0);
+    create_argument * carg = (create_argument*) malloc(sizeof(create_argument));
+    carg->arg = __arg;
+    carg->fnc = __start_routine;
+    carg->parentid = mytid;
 
-		++global_index;
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    res = FPTHREAD_CREATE(__newthread, __attr, thread_function, (void*) carg);
 
-		create_argument * carg = (create_argument*) malloc(
-				sizeof(create_argument));
-		carg->arg = __arg;
-		carg->fnc = __start_routine;
-		carg->parentid = mytid;
+    FPTHREAD_MUTEX_LOCK(&id_lock);
+    id_map[*__newthread] = ++global_id;
+    FPTHREAD_MUTEX_UNLOCK(&id_lock);
 
-		res = FPTHREAD_CREATE(__newthread, __attr, thread_function,
-				(void*) carg);
+    currentCreateOrder++;
+    FPTHREAD_MUTEX_UNLOCK(&atomic_create);
 
-		FPTHREAD_MUTEX_LOCK(&id_lock);
-		id_map[*__newthread] = ++global_id;
-		FPTHREAD_MUTEX_UNLOCK(&id_lock);
-		FPTHREAD_MUTEX_UNLOCK(&atomic_create);
-	}
-
-	return res;
+    return res;
 }
 
 int mypthread_mutex_lock(pthread_mutex_t * __mutex)
 {
-	if (!enable_tool)
-		return FPTHREAD_MUTEX_LOCK(__mutex);
+    if (!enable_tool)
+        return FPTHREAD_MUTEX_LOCK(__mutex);
 
-	UINT32 mytid;
-	getmyid(&mytid);
-	int res = 0;
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 1);
-		res = FPTHREAD_MUTEX_LOCK(__mutex);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		res = FPTHREAD_MUTEX_LOCK(__mutex);
-		record(mytid, 1);
-	}
+    UINT32 mytid;
+    getmyid(&mytid);
+    int res = 0;
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 1);
+        res = FPTHREAD_MUTEX_LOCK(__mutex);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        res = FPTHREAD_MUTEX_LOCK(__mutex);
+        record(mytid, 1);
+    }
 
-	current_vc[mytid].tick();
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
-	map<pthread_mutex_t*, VectorClock>::iterator itr = mutex_map.find(__mutex);
-	if (itr != mutex_map.end())
-	{
-		if (itr->second.threadId != NO_ID)
-		{
-			current_vc[mytid].receiveAction(&(itr->second));
-			itr->second.threadId = NO_ID;
-		}
-	}
-	FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
+    FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
+    map<pthread_mutex_t*, VectorClock>::iterator itr = mutex_map.find(__mutex);
+    if (itr != mutex_map.end())
+    {
+        if (itr->second.threadId != NO_ID)
+        {
+            current_vc[mytid].receiveAction(&(itr->second));
+            itr->second.threadId = NO_ID;
+        }
+    }
+    FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
 
-	return res;
+    return res;
 }
 
 int mypthread_mutex_unlock(pthread_mutex_t * __mutex)
 {
-	if (!enable_tool)
-		return FPTHREAD_MUTEX_UNLOCK(__mutex);
+    if (!enable_tool)
+        return FPTHREAD_MUTEX_UNLOCK(__mutex);
 
-	UINT32 mytid;
-	getmyid(&mytid);
-	int res = 0;
+    UINT32 mytid;
+    getmyid(&mytid);
+    int res = 0;
 
-	current_vc[mytid].tick();
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
-	mutex_map[__mutex] = current_vc[mytid];
-	FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
+    FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
+    mutex_map[__mutex] = current_vc[mytid];
+    FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
 
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 2);
-		res = FPTHREAD_MUTEX_UNLOCK(__mutex);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		record(mytid, 2);
-		res = FPTHREAD_MUTEX_UNLOCK(__mutex);
-	}
-	return res;
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 2);
+        res = FPTHREAD_MUTEX_UNLOCK(__mutex);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        record(mytid, 2);
+        res = FPTHREAD_MUTEX_UNLOCK(__mutex);
+    }
+    return res;
 }
 
 int mypthread_cond_wait(pthread_cond_t *__restrict __cond,
-		pthread_mutex_t *__restrict __mutex)
+                        pthread_mutex_t *__restrict __mutex)
 {
-	if (!enable_tool)
-		return FPTHREAD_COND_WAIT(__cond, __mutex);
+    if (!enable_tool)
+        return FPTHREAD_COND_WAIT(__cond, __mutex);
 
-	UINT32 mytid;
-	getmyid(&mytid);
+    UINT32 mytid;
+    getmyid(&mytid);
 
-	current_vc[mytid].tick();
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
-	mutex_map[(pthread_mutex_t *) __mutex] = current_vc[mytid];
-	FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
+    FPTHREAD_MUTEX_LOCK(&mutex_map_lock);
+    mutex_map[(pthread_mutex_t *) __mutex] = current_vc[mytid];
+    FPTHREAD_MUTEX_UNLOCK(&mutex_map_lock);
 
-	if (KnobMode.Value() == "record")
-	{
-		record(mytid, 3);
-	}
-	else if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 3);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
+    if (KnobMode.Value() == "record")
+    {
+        record(mytid, 3);
+    }
+    else if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 3);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
 
-	int res = FPTHREAD_COND_WAIT(__cond, __mutex);
+    int res = FPTHREAD_COND_WAIT(__cond, __mutex);
 
-	FPTHREAD_MUTEX_LOCK(&cond_map_lock);
-	map<pthread_cond_t*, VectorClock>::iterator itr = cond_map.find(
-			(pthread_cond_t *) __cond);
-	if (itr != cond_map.end())
-	{
-		if (itr->second.threadId != NO_ID)
-		{
-			current_vc[mytid].receiveAction(&(itr->second));
-			itr->second.threadId = NO_ID;
-		}
-	}
-	FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
+    FPTHREAD_MUTEX_LOCK(&cond_map_lock);
+    map<pthread_cond_t*, VectorClock>::iterator itr = cond_map.find(
+                (pthread_cond_t *) __cond);
+    if (itr != cond_map.end())
+    {
+        if (itr->second.threadId != NO_ID)
+        {
+            current_vc[mytid].receiveAction(&(itr->second));
+            itr->second.threadId = NO_ID;
+        }
+    }
+    FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
 
-	if (KnobMode.Value() == "record")
-	{
-		record(mytid, 3);
-	}
-	else if (KnobMode.Value() == "replay")
-	{
-		//this is slightly different than others
-		pair<UINT32, SIZE> temp_pair;
-		while (true)
-		{
-			FPTHREAD_MUTEX_LOCK(&index_lock);
-			temp_pair = (index_queue.at(global_index)).second;
-			if (temp_pair.first == mytid)
-				break;
-			else
-			{
-				FPTHREAD_MUTEX_UNLOCK(&index_lock);
-				//force to release mutex
-				FPTHREAD_MUTEX_UNLOCK(__mutex);
-				PIN_Sleep(SLEEP_TIME);
-				//acquire lock try again
-				FPTHREAD_MUTEX_LOCK(__mutex);
-			}
-		}
-		addToVector(global_index, mytid, 3);
-		++global_index;
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
+    if (KnobMode.Value() == "record")
+    {
+        record(mytid, 3);
+    }
+    else if (KnobMode.Value() == "replay")
+    {
+        //this is slightly different than others
+        pair<UINT32, SIZE> temp_pair;
+        while (true)
+        {
+            FPTHREAD_MUTEX_LOCK(&index_lock);
+            temp_pair = (index_queue.at(global_index)).second;
+            if (temp_pair.first == mytid)
+                break;
+            else
+            {
+                FPTHREAD_MUTEX_UNLOCK(&index_lock);
+                //force to release mutex
+                FPTHREAD_MUTEX_UNLOCK(__mutex);
+                PIN_Sleep(SLEEP_TIME);
+                //acquire lock try again
+                FPTHREAD_MUTEX_LOCK(__mutex);
+            }
+        }
+        addToVector(global_index, mytid, 3);
+        ++global_index;
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
 
-	return res;
+    return res;
 }
 
 int mypthread_cond_signal(pthread_cond_t * __cond)
 {
-	if (!enable_tool)
-		return FPTHREAD_COND_SIGNAL(__cond);
+    if (!enable_tool)
+        return FPTHREAD_COND_SIGNAL(__cond);
 
-	UINT32 mytid;
-	getmyid(&mytid);
-	int res = 0;
+    UINT32 mytid;
+    getmyid(&mytid);
+    int res = 0;
 
-	current_vc[mytid].tick();
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&cond_map_lock);
-	cond_map[__cond] = current_vc[mytid];
-	FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
+    FPTHREAD_MUTEX_LOCK(&cond_map_lock);
+    cond_map[__cond] = current_vc[mytid];
+    FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
 
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 4);
-		res = FPTHREAD_COND_SIGNAL(__cond);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		record(mytid, 4);
-		res = FPTHREAD_COND_SIGNAL(__cond);
-	}
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 4);
+        res = FPTHREAD_COND_SIGNAL(__cond);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        record(mytid, 4);
+        res = FPTHREAD_COND_SIGNAL(__cond);
+    }
 
-	return res;
+    return res;
 }
 
 int mypthread_cond_broadcast(pthread_cond_t * __cond)
 {
-	if (!enable_tool)
-		return FPTHREAD_COND_BROADCAST(__cond);
+    if (!enable_tool)
+        return FPTHREAD_COND_BROADCAST(__cond);
 
-	UINT32 mytid;
-	getmyid(&mytid);
-	int res = 0;
+    UINT32 mytid;
+    getmyid(&mytid);
+    int res = 0;
 
-	current_vc[mytid].tick();
+    current_vc[mytid].tick();
 
-	FPTHREAD_MUTEX_LOCK(&cond_map_lock);
-	cond_map[__cond] = current_vc[mytid];
-	FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
+    FPTHREAD_MUTEX_LOCK(&cond_map_lock);
+    cond_map[__cond] = current_vc[mytid];
+    FPTHREAD_MUTEX_UNLOCK(&cond_map_lock);
 
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 5);
-		res = FPTHREAD_COND_BROADCAST(__cond);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		record(mytid, 5);
-		res = FPTHREAD_COND_BROADCAST(__cond);
-	}
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 5);
+        res = FPTHREAD_COND_BROADCAST(__cond);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        record(mytid, 5);
+        res = FPTHREAD_COND_BROADCAST(__cond);
+    }
 
-	return res;
+    return res;
 }
 
 int mypthread_barrier_wait(pthread_barrier_t * __barrier)
 {
-	if (!enable_tool)
-		return FPTHREAD_BARRIER_WAIT(__barrier);
+    if (!enable_tool)
+        return FPTHREAD_BARRIER_WAIT(__barrier);
 
-	UINT32 mytid;
-	getmyid(&mytid);
+    UINT32 mytid;
+    getmyid(&mytid);
 
-	FPTHREAD_MUTEX_LOCK(&barrier_map_lock);
-	map<pthread_barrier_t*, deque<VectorClock>*>::iterator itr =
-			barrier_map.find(__barrier);
-	deque<VectorClock>* barrier_list = NULL;
-	if (itr != barrier_map.end())
-	{
-		barrier_list = itr->second;
-	}
+    FPTHREAD_MUTEX_LOCK(&barrier_map_lock);
+    map<pthread_barrier_t*, deque<VectorClock>*>::iterator itr =
+        barrier_map.find(__barrier);
+    deque<VectorClock>* barrier_list = NULL;
+    if (itr != barrier_map.end())
+    {
+        barrier_list = itr->second;
+    }
 
-	current_vc[mytid].tick();
-	if (barrier_list != NULL)
-	{
-		barrier_list->push_back(current_vc[mytid]);
-	}
-	else
-	{
-		barrier_list = new deque<VectorClock>;
-		barrier_list->push_back(current_vc[mytid]);
-		barrier_map[__barrier] = barrier_list;
-	}
-	FPTHREAD_MUTEX_UNLOCK(&barrier_map_lock);
+    current_vc[mytid].tick();
+    if (barrier_list != NULL)
+    {
+        barrier_list->push_back(current_vc[mytid]);
+    }
+    else
+    {
+        barrier_list = new deque<VectorClock>;
+        barrier_list->push_back(current_vc[mytid]);
+        barrier_map[__barrier] = barrier_list;
+    }
+    FPTHREAD_MUTEX_UNLOCK(&barrier_map_lock);
 
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 6);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		record(mytid, 6);
-	}
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 6);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        record(mytid, 6);
+    }
 
-	int res = FPTHREAD_BARRIER_WAIT(__barrier);
+    int res = FPTHREAD_BARRIER_WAIT(__barrier);
 
-	FPTHREAD_MUTEX_LOCK(&barrier_map_lock);
-	itr = barrier_map.find(__barrier);
-	barrier_list = NULL;
-	if (itr != barrier_map.end())
-	{
-		barrier_list = itr->second;
-	}
-	//bool found = false;
-	VectorClock myClock;
-	deque<VectorClock>::iterator qitr = barrier_list->begin();
-	for (; qitr != barrier_list->end(); ++qitr)
-	{
-		if ((*qitr).threadId == mytid)
-		{
-			myClock = (*qitr);
-			barrier_list->erase(qitr);
-			//found =true;
-			break;
-		}
-	}
+    FPTHREAD_MUTEX_LOCK(&barrier_map_lock);
+    itr = barrier_map.find(__barrier);
+    barrier_list = NULL;
+    if (itr != barrier_map.end())
+    {
+        barrier_list = itr->second;
+    }
+    //bool found = false;
+    VectorClock myClock;
+    deque<VectorClock>::iterator qitr = barrier_list->begin();
+    for (; qitr != barrier_list->end(); ++qitr)
+    {
+        if ((*qitr).threadId == mytid)
+        {
+            myClock = (*qitr);
+            barrier_list->erase(qitr);
+            //found =true;
+            break;
+        }
+    }
 
-	qitr = barrier_list->begin();
-	for (; qitr != barrier_list->end(); ++qitr)
-	{
-		myClock.receiveAction(&(*qitr));
-		qitr->receiveAction(&myClock);
-	}
-	current_vc[mytid] = myClock;
-	FPTHREAD_MUTEX_UNLOCK(&barrier_map_lock);
+    qitr = barrier_list->begin();
+    for (; qitr != barrier_list->end(); ++qitr)
+    {
+        myClock.receiveAction(&(*qitr));
+        qitr->receiveAction(&myClock);
+    }
+    current_vc[mytid] = myClock;
+    FPTHREAD_MUTEX_UNLOCK(&barrier_map_lock);
 
-	if (KnobMode.Value() == "replay")
-	{
-		replay(mytid, 6);
-		FPTHREAD_MUTEX_UNLOCK(&index_lock);
-	}
-	else if (KnobMode.Value() == "record")
-	{
-		record(mytid, 6);
-	}
+    if (KnobMode.Value() == "replay")
+    {
+        replay(mytid, 6);
+        FPTHREAD_MUTEX_UNLOCK(&index_lock);
+    }
+    else if (KnobMode.Value() == "record")
+    {
+        record(mytid, 6);
+    }
 
-	return res;
+    return res;
 }
 
 int mymain(int argc, char ** argv)
 {
+    if (KnobMode.Value() == "replay")
+    {
+        RECORD_PAIR file_record;
+        ifstream ifs(KnobOutputFile.Value().c_str(), ifstream::in);
+        int record_count;
+        ifs >> record_count;
+        for (int i = 0; i < record_count; i++)
+        {
+            ifs >> file_record.first >> file_record.second.first
+            >> file_record.second.second;
+            index_queue.push_back(file_record);
+        }
+        ifs.close();
+        sort(index_queue.begin(), index_queue.end());
 
-	if (KnobMode.Value() == "replay")
-	{
-		RECORD_PAIR file_record;
-		ifstream ifs(KnobOutputFile.Value().c_str(), ifstream::in);
-		int record_count;
-		ifs >> record_count;
-		for (int i = 0; i < record_count; i++)
-		{
-			ifs >> file_record.first >> file_record.second.first
-					>> file_record.second.second;
-			index_queue.push_back(file_record);
-		}
-		ifs.close();
-		sort(index_queue.begin(), index_queue.end());
+        logToFile("c", index_queue, &index_lock);
+    }
 
-		logToFile("c", index_queue, &index_lock);
-	}
+    //assign main thread vector clock
+    current_vc[0].threadId = 0;
+    current_vc[0].tick();
 
-	//assign main thread vector clock
-	current_vc[0].threadId = 0;
-	current_vc[0].tick();
+    /* MY ADDITIONS */
+    puts("MAYINdayim\n");
+    FILE* createFile = fopen(KnobCreateFile.Value().c_str(), "r");
+    THREADID tid, parent;
+    int readCount;
+    while (!feof(createFile))
+    {
+        readCount = fscanf(createFile, "%d %d\n", &tid, &parent);
+        if (readCount != 2)
+        {
+            fprintf(stderr, "error occured while reading from create file %s\n",
+                    KnobCreateFile.Value().c_str());
+            exit(1);
+        }
+        threadCreateOrder.push_back(CreateInfo(tid, parent));
+    }
+    currentCreateOrder  = threadCreateOrder.begin();
+    /* MY ADDITIONS */
 
-	enable_tool = true;
-	int res = FMAIN(argc, argv);
-	enable_tool = false;
-	if (KnobMode.Value() == "record")
-		logToFile(KnobOutputFile.Value().c_str(), record_vector, &out_lock);
-	else if (KnobMode.Value() == "replay")
-		logToFile("d", record_vector, &out_lock);
+    enable_tool = true;
 
-	return res;
+    // start main
+    int res = FMAIN(argc, argv);
+
+    enable_tool = false;
+    if (KnobMode.Value() == "record")
+        logToFile(KnobOutputFile.Value().c_str(), record_vector, &out_lock);
+    else if (KnobMode.Value() == "replay")
+        logToFile("d", record_vector, &out_lock);
+
+    return res;
 }
 
 /* ===================================================================== */
@@ -643,69 +636,79 @@ int mymain(int argc, char ** argv)
 /* ===================================================================== */
 inline AFUNPTR probeFunction(IMG img, const char * name, AFUNPTR funptr)
 {
-	RTN rtn = RTN_FindByName(img, name);
-	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
-	{
-		return (RTN_ReplaceProbed(rtn, funptr));
-	}
+    RTN rtn = RTN_FindByName(img, name);
+    //	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
+    if (RTN_Valid(rtn))
+    {
+        //		return (RTN_ReplaceProbed(rtn, funptr));
+        return (RTN_Replace(rtn, funptr));
+    }
 
-	return NULL;
+    return NULL;
 }
 
 inline AFUNPTR probeFunctionByAddress(ADDRINT addr, AFUNPTR funptr)
 {
-	RTN rtn = RTN_FindByAddress(addr);
-	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
-	{
-		return (RTN_ReplaceProbed(rtn, funptr));
-	}
+    RTN rtn = RTN_FindByAddress(addr);
+    //	if (RTN_Valid(rtn) && RTN_IsSafeForProbedReplacement(rtn))
+    if (RTN_Valid(rtn))
+    {
+        //		return (RTN_ReplaceProbed(rtn, funptr));
+        return (RTN_Replace(rtn, funptr));
+    }
 
-	return NULL;
+    return NULL;
 }
 
 // Image load callback - inserts the probes.
 void ImgLoad(IMG img, void *v)
 {
-	if ((IMG_Name(img).find("libpthread.so") != string::npos)
-			|| (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
-			|| (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
-	{
+    if ((IMG_Name(img).find("libpthread.so") != string::npos)
+            || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
+            || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
+    {
+        puts("pthread'leri replace ediyorum...");
+        FPTHREAD_SELF           = (pthread_t (*)(void))probeFunction(img,"pthread_self",AFUNPTR(mypthread_self));
+        FPTHREAD_CREATE		    = (int (*)(pthread_t *__restrict, __const pthread_attr_t *__restrict, void *(*)(void *),void *__restrict))
+                               probeFunction(img, "pthread_create",AFUNPTR(mypthread_create));
+        if(FPTHREAD_CREATE == NULL)
+        {
+            fprintf(stderr, "create'i wrap edemedi\n");
+            exit(1);
+        }
+        FPTHREAD_MUTEX_LOCK     = (int (*)(pthread_mutex_t *)) probeFunction(img, "pthread_mutex_lock",AFUNPTR(mypthread_mutex_lock));
+        FPTHREAD_COND_WAIT      = (int (*)(pthread_cond_t *__restrict,pthread_mutex_t *__restrict)) probeFunction(img,"pthread_cond_wait",AFUNPTR(mypthread_cond_wait));
+        FPTHREAD_COND_BROADCAST = (int (*)(pthread_cond_t *)) probeFunction(img,"pthread_cond_broadcast",AFUNPTR(mypthread_cond_broadcast));
+        FPTHREAD_MUTEX_UNLOCK   = (int (*)(pthread_mutex_t *)) probeFunction(img,"pthread_mutex_unlock",AFUNPTR(mypthread_mutex_unlock));
+        FPTHREAD_BARRIER_WAIT   = (int (*)(pthread_barrier_t * )) probeFunction(img,"pthread_barrier_wait",AFUNPTR(mypthread_barrier_wait));
 
-		FPTHREAD_SELF = (pthread_t (*)(void))
-		probeFunction(img,"pthread_self",AFUNPTR(mypthread_self));FPTHREAD_CREATE = (int (*)(pthread_t *__restrict, __const pthread_attr_t *__restrict, void *(*)(void *),void *__restrict))
-				probeFunction(img, "pthread_create",AFUNPTR(mypthread_create));
-		FPTHREAD_MUTEX_LOCK = (int (*)(pthread_mutex_t *)) probeFunction(img, "pthread_mutex_lock",AFUNPTR(mypthread_mutex_lock));
-		FPTHREAD_COND_WAIT = (int (*)(pthread_cond_t *__restrict,pthread_mutex_t *__restrict))
-				probeFunction(img,"pthread_cond_wait",AFUNPTR(mypthread_cond_wait));
-		FPTHREAD_COND_BROADCAST = (int (*)(pthread_cond_t *)) probeFunction(img,"pthread_cond_broadcast",AFUNPTR(mypthread_cond_broadcast));
-		FPTHREAD_MUTEX_UNLOCK = (int (*)(pthread_mutex_t *)) probeFunction(img,"pthread_mutex_unlock",AFUNPTR(mypthread_mutex_unlock));
-		FPTHREAD_BARRIER_WAIT = (int (*)(pthread_barrier_t * )) probeFunction(img,"pthread_barrier_wait",AFUNPTR(mypthread_barrier_wait));
+    }
 
-	}
-		if(IMG_IsMainExecutable(img))
-		{
-			FMAIN=(int(*)(int,char**))probeFunction(img,"main",AFUNPTR(mymain));
-		}
-	}
+    if(IMG_IsMainExecutable(img))
+    {
+        FMAIN=(int(*)(int,char**))probeFunction(img,"main",AFUNPTR(mymain));
+    }
+}
 
-	/* ===================================================================== */
-	/* Main function                                                         */
-	/* ===================================================================== */
+/* ===================================================================== */
+/* Main function                                                         */
+/* ===================================================================== */
 
 int main(int argc, char *argv[])
 {
-	// Initialize Pin
-	PIN_InitSymbols();
-	if (PIN_Init(argc, argv))
-	{
-		return Usage();
-	}
+    // Initialize Pin
+    PIN_InitSymbols();
+    if (PIN_Init(argc, argv))
+    {
+        return Usage();
+    }
 
-	// Register the instrumentation callback
-	IMG_AddInstrumentFunction(ImgLoad, 0);
+    // Register the instrumentation callback
+    IMG_AddInstrumentFunction(ImgLoad, 0);
 
-	// Start the application
-	PIN_StartProgramProbed(); // never returns
-	return 0;
+    // Start the application
+    //	PIN_StartProgramProbed(); // never returns
+    PIN_StartProgram(); // never returns
+    return 0;
 }
 

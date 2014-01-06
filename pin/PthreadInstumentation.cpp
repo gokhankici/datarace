@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <assert.h>
+#include <algorithm>
 
 #include "PthreadInstumentation.h"
 #include "GlobalVariables.h"
@@ -67,8 +68,6 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	string filename = KnobOutputFile.Value() + "." + decstr(tid);
 	FILE* out = fopen(filename.c_str(), "w");
-//	fprintf(out, "PIN_TID:%d OS_TID:0x%x\n", tid, PIN_GetTid());
-//	fflush(out);
 	tls->out = out;
 
 	// put my OS-ThreadId / PIN-ThreadId mapping
@@ -83,25 +82,11 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		assert(parentTidItr != threadIdMap.end());
 		THREADID parentTID = parentTidItr->second;
 
-		if (lastParent == parentTID)
-		{
-			createdThreadCount++;
-		}
-		else
-		{
-			if (createdThreadCount)
-			{
-				fprintf(createFile, "%u %d\n", lastParent, createdThreadCount);
-			}
+		CreateInfo thisThreadInfo(tid, parentTID);
+		threadCreateOrder.push_back(thisThreadInfo);
 
-			lastParent = parentTID;
-			createdThreadCount = 1;
-		}
-
-		// get its vector clock
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
 
-		// create vs from parent's clock
 		VectorClock* parentVC = parentTls->vectorClock;
 		Bloom* parentRead = parentTls->readBloomFilter;
 		Bloom* parentWrite = parentTls->writeBloomFilter;
@@ -171,15 +156,6 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
 		assert(parentTidItr != threadIdMap.end());
 		THREADID parentTID = parentTidItr->second;
-
-		if (createdThreadCount)
-		{
-			fprintf(createFile, "%u %d\n", lastParent, createdThreadCount);
-			fflush(createFile);
-
-			lastParent = 0;
-			createdThreadCount = 0;
-		}
 
 		// get its vector clock
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
@@ -267,7 +243,7 @@ VOID AfterLock(THREADID tid)
 	if (itr != unlockedThreadMap->end())
 	{
 		ThreadInfo threadInfo = itr->second;
-		if (threadInfo.tid != NO_ID )
+		if (threadInfo.tid != NO_ID)
 		{
 			vectorClock->receiveAction(threadInfo.vectorClock);
 		}
@@ -418,7 +394,7 @@ VOID AfterCondWait(THREADID tid)
 	{
 		ThreadInfo threadInfo = itr->second;
 
-		if (threadInfo.tid != NO_ID )
+		if (threadInfo.tid != NO_ID)
 		{
 			vectorClock->receiveAction(threadInfo.vectorClock);
 			threadInfo.tid = NO_ID;
@@ -632,7 +608,7 @@ VOID ImageLoad(IMG img, VOID *)
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeLock),
 				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterLock), IARG_THREAD_ID,
-				IARG_END);
+		IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -708,4 +684,18 @@ VOID ImageLoad(IMG img, VOID *)
 				IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
 		RTN_Close(rtn);
 	}
+}
+
+VOID Fini(INT32 code, VOID *v)
+{
+	std::sort(threadCreateOrder.begin(), threadCreateOrder.end());
+	ThreadCreateOrderItr itr = threadCreateOrder.begin();
+	ThreadCreateOrderItr end = threadCreateOrder.end();
+
+	for(; itr != end; itr++)
+	{
+		CreateInfo ci = *itr;
+		fprintf(createFile, "%d %d\n", ci.tid, ci.parent);
+	}
+	fclose(createFile);
 }

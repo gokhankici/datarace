@@ -95,7 +95,8 @@ $(OBJDIR)%.o : %.cpp
 $(TOOLS): $(PIN_LIBNAMES)
 
 $(TOOLS): %$(PINTOOL_SUFFIX) : %.o  $(OBJDIR)VectorClock.o
-	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ -L../../../intel64/runtime/glibc ${PIN_LPATHS} $(PIN_LIBS)  $(DBG) 
+	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ ${PIN_LPATHS} $(PIN_LIBS)  $(DBG) 
+#	${PIN_LD} $(PIN_LDFLAGS) $(LINK_DEBUG) ${LINK_OUT}$@ $^ -L../../../intel64/runtime/glibc ${PIN_LPATHS} $(PIN_LIBS)  $(DBG) 
 
 
 ## cleaning

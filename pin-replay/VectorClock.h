@@ -7,7 +7,6 @@
 
 using namespace std;
 
-
 const int MAX_THREAD_COUNT=96;
 
 typedef unsigned int uint32_t;
