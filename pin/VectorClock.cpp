@@ -60,6 +60,7 @@ VectorClock::VectorClock(istream& in, int processId)
 
 	size_t byteCount = sizeof(int) * totalProcessCount;
 	vc = (UINT32*) malloc(byteCount);
+	memset(vc, 0, byteCount);
 
 	int i = 0;
 	string s;
@@ -207,7 +208,7 @@ ostream& operator<<(ostream& os, const VectorClock& v)
 	{
 		os << values[i] << ",";
 	}
-	os << values[v.totalDeletedLockCount - 1] << endl;
+	os << values[v.totalProcessCount - 1] << endl;
 
 	return os;
 }

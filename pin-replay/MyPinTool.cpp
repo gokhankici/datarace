@@ -9,7 +9,7 @@
 #include "pin.H"
 #include <semaphore.h>
 
-/* MY ADDITIONS */
+/* ### MY ADDITIONS ################################################ */
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
@@ -22,7 +22,7 @@
 #include "../pin/RecordNReplay.h"
 #include "../pin/VectorClock.h"
 #include "../pin/SigraceModules.h"
-/* MY ADDITIONS */
+/* ### MY ADDITIONS ################################################ */
 
 /* KNOB parameters */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "output",
@@ -47,11 +47,18 @@ INT32 Usage()
 	return 1;
 }
 
+/* ### MY ADDITIONS ################################################ */
+//#define ENABLE_REEXECUTE_DEBUG
+
+typedef vector<VectorClock> EpochList;
+typedef EpochList::iterator EpochListIterator;
+
 class ThreadLocalStorage
 {
 public:
 	FILE* out;
-	vector<VectorClock> epochList;
+	EpochList epochList;
+	VectorClock currentVC;
 
 	ThreadLocalStorage()
 	{
@@ -69,6 +76,27 @@ public:
 };
 TLS_KEY tlsKey;
 
+inline static
+ThreadLocalStorage* getTLS(THREADID tid)
+{
+	return static_cast<ThreadLocalStorage*> (PIN_GetThreadData(tlsKey, tid));
+}
+
+inline static
+void verifyVectorClock(ThreadLocalStorage* tls)
+{
+	EpochListIterator itr = tls->epochList.begin();
+	assert(*itr == tls->currentVC);
+	tls->epochList.pop_back();
+}
+
+ThreadCreateOrder threadCreateOrder;
+ThreadCreateOrderItr currentCreateOrder;
+
+ThreadIdMap threadIdMap;
+
+/* ### MY ADDITIONS ################################################ */
+
 typedef pair<UINT32, pair<UINT32, SIZE> > RECORD_PAIR;
 
 const UINT32 SLEEP_TIME = 10;
@@ -80,8 +108,10 @@ PIN_LOCK mutex_map_lock;
 PIN_LOCK cond_map_lock;
 PIN_LOCK barrier_map_lock;
 PIN_LOCK id_lock;
-PIN_LOCK index_lock;
 PIN_LOCK out_lock;
+
+PIN_LOCK threadStartLock;
+PIN_LOCK index_lock;
 PIN_LOCK atomic_create;
 
 VectorClock current_vc[MAX_THREAD_COUNT];
@@ -93,13 +123,6 @@ map<pthread_cond_t*, VectorClock> cond_map;
 map<pthread_barrier_t*, deque<VectorClock>* > barrier_map;
 vector<RECORD_PAIR> index_queue;
 vector<RECORD_PAIR> record_vector;
-
-/* MY ADDITIONS */
-ThreadCreateOrder threadCreateOrder;
-ThreadCreateOrderItr currentCreateOrder;
-
-ThreadIdMap threadIdMap;
-/* MY ADDITIONS */
 
 /*
 inline void getmyid(UINT32*newid)
@@ -176,7 +199,6 @@ inline void addToVector(const UINT32 global_index, const UINT32 mytid,
 	record_vector.push_back(r);
 	FPTHREAD_MUTEX_UNLOCK(&out_lock);
 }
-*/
 
 void logToFile(const char * name, const vector<RECORD_PAIR> & v, THREADID tid, PIN_LOCK* lock)
 {
@@ -195,7 +217,6 @@ void logToFile(const char * name, const vector<RECORD_PAIR> & v, THREADID tid, P
 	OutFile.close();
 }
 
-/*
 inline void record(const UINT32 mytid, const SIZE op)
 {
 	UINT32 ts = getCurrentEventAndAdvance();
@@ -566,24 +587,6 @@ int mypthread_barrier_wait(pthread_barrier_t * __barrier)
 
 VOID BeforeMain(THREADID tid, int argc, char ** argv)
 {
-	if (KnobMode.Value() == "replay")
-	{
-		RECORD_PAIR file_record;
-		ifstream ifs(KnobOutputFile.Value().c_str(), ifstream::in);
-		int record_count;
-		ifs >> record_count;
-		for (int i = 0; i < record_count; i++)
-		{
-			ifs >> file_record.first >> file_record.second.first
-			>> file_record.second.second;
-			index_queue.push_back(file_record);
-		}
-		ifs.close();
-		sort(index_queue.begin(), index_queue.end());
-
-		logToFile("c", index_queue, tid, &index_lock);
-	}
-
 	//assign main thread vector clock
 	current_vc[0].threadId = 0;
 	current_vc[0].advance();
@@ -615,6 +618,82 @@ VOID BeforeMain(THREADID tid, int argc, char ** argv)
 #define INSTRUMENT_BEFORE 1
 #define INSTRUMENT_AFTER  2
 #define INSTRUMENT_BOTH   (INSTRUMENT_BEFORE | INSTRUMENT_AFTER)
+
+VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
+{
+	ThreadLocalStorage* tls = new ThreadLocalStorage();
+
+	GetLock(&threadStartLock, tid + 1);
+
+	// check for correct thread id at creation
+	threadIdMap[PIN_GetTid()] = tid;
+
+	INT32 parentOS_TID = PIN_GetParentTid();
+	if (parentOS_TID)
+	{
+		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
+		assert(parentTidItr != threadIdMap.end());
+		THREADID parentTID = parentTidItr->second;
+		ThreadLocalStorage* parentTLS = getTLS(parentTID);
+		tls->currentVC = VectorClock(parentTLS->currentVC, tid);
+
+		parentTLS->currentVC.advance();
+#ifdef ENABLE_REEXECUTE_DEBUG
+
+		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
+#endif
+
+	}
+	else
+	{
+		tls->currentVC = VectorClock(tid);
+#ifdef ENABLE_REEXECUTE_DEBUG
+
+		printf("Thread %d is started (root thread)\n", tid);
+#endif
+
+	}
+
+#ifdef ENABLE_REEXECUTE_DEBUG
+	cout << tls->currentVC;
+#endif
+
+	char epochFileName[30] =
+	    {'\0'
+	    };
+	sprintf(epochFileName, "%s%d", KnobEpochFile.Value().c_str(), tid);
+	ifstream infile(epochFileName);
+
+	while (infile)
+	{
+		string s;
+		if (!getline( infile, s ))
+		{
+			break;
+		}
+
+		istringstream ss( s );
+		vector <int> record;
+
+		tls->epochList.push_back(VectorClock(ss, tid));
+	}
+
+	verifyVectorClock(tls);
+#ifdef ENABLE_REEXECUTE_DEBUG
+
+	cout << "Printing epoch list of thread " << tid << endl;
+	vector<VectorClock>::size_type data_i_size;
+	for (vector< VectorClock >::size_type i = 0; i < tls->epochList.size(); i++)
+	{
+		cout << i << " : " << tls->epochList[i];
+	}
+	cout << endl;
+#endif
+
+	PIN_SetThreadData(tlsKey, tls, tid);
+
+	ReleaseLock(&threadStartLock);
+}
 
 /* ===================================================================== */
 /* Instrumnetation functions                                             */
@@ -711,60 +790,6 @@ void ImgLoad(IMG img, void *v)
 	}
 }
 
-VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
-{
-	/*
-	// check for correct thread id at creation
-	threadIdMap[PIN_GetTid()] = tid;
-
-	INT32 parentOS_TID = PIN_GetParentTid();
-	if (parentOS_TID)
-{
-		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
-		assert(parentTidItr != threadIdMap.end());
-		THREADID parentTID = parentTidItr->second;
-
-		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
-}
-	else
-{
-		printf("Thread %d is started (root thread)\n", tid);
-}
-	*/
-
-	ThreadLocalStorage* tls = new ThreadLocalStorage();
-
-
-	char epochFileName[30] = {'\0'};
-	sprintf(epochFileName, "%s%d", KnobEpochFile.Value().c_str(), tid);
-	ifstream infile(epochFileName);
-
-	while (infile)
-	{
-		string s;
-		if (!getline( infile, s ))
-		{
-			break;
-		}
-
-		istringstream ss( s );
-		vector <int> record;
-
-		tls->epochList.push_back(VectorClock(ss, tid));
-	}
-
-	GetLock(&id_lock, tid + 1);
-	cout << "Printing epoch list of thread " << tid << endl;
-	vector<VectorClock>::size_type data_i_size;
-	for (vector< VectorClock >::size_type i = 0; i < tls->epochList.size(); i++)
-	{
-		cout << i << " : " << tls->epochList[i];
-	}
-	ReleaseLock(&id_lock);
-
-	PIN_SetThreadData(tlsKey, tls, tid);
-}
-
 /* ===================================================================== */
 /* Main function                                                         */
 /* ===================================================================== */
@@ -786,6 +811,7 @@ int main(int argc, char *argv[])
 	InitLock(&index_lock);
 	InitLock(&out_lock);
 	InitLock(&atomic_create);
+	InitLock(&threadStartLock);
 
 	// Register the instrumentation callback
 	IMG_AddInstrumentFunction(ImgLoad, 0);

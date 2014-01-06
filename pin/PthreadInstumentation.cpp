@@ -19,9 +19,7 @@
  */
 static ThreadLocalStorage* getTLS(THREADID tid)
 {
-	ThreadLocalStorage* tls =
-			static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
-	return tls;
+	return static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 }
 
 /*
@@ -34,6 +32,7 @@ static void printSignatures(THREADID tid)
 	VectorClock* vectorClock = tls->vectorClock;
 
 #ifdef DEBUG_MODE
+
 	printf("Thread %d:\n", tid);
 	printf("\tVC: ");
 	cout << *vectorClock << endl;
@@ -99,10 +98,11 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 		// add current signature to the rdm
 		rdm.addSignature(
-				new SigRaceData(parentTID, *parentVC, *parentRead,
-						*parentWrite));
+		    new SigRaceData(parentTID, *parentVC, *parentRead,
+		                    *parentWrite));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 		fprintf(parentTls->out, "--- PTHREAD CREATE %d---\n", tid);
 #endif
 
@@ -139,7 +139,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	GetLock(&rdmLock, tid + 1);
 	printSignatures();
 	rdm.addSignature(
-			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 	ReleaseLock(&rdmLock);
 
 	vectorClock->advance();
@@ -171,10 +171,11 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		printSignatures(parentTID);
 
 		rdm.addSignature(
-				new SigRaceData(parentTID, *parentVC, *parentRead,
-						*parentWrite));
+		    new SigRaceData(parentTID, *parentVC, *parentRead,
+		                    *parentWrite));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 		fprintf(parentTls->out, "--- PTHREAD JOIN WITH %d---\n", tid);
 #endif
 
@@ -219,6 +220,7 @@ VOID AfterLock(THREADID tid)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
+
 	printf("Thread %d acquired a lock[%lX].\n", tid, lockAddr);
 	fflush(stdout);
 #endif
@@ -228,9 +230,10 @@ VOID AfterLock(THREADID tid)
 	printSignatures();
 	// add signature to the rdm
 	rdm.addSignature(
-			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	FILE* out = tls->out;
 	fprintf(out, "--- MUTEX LOCK ---\n");
 #endif
@@ -283,6 +286,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
+
 	printf("Thread %d released a lock[%lX].\n", tid, lockAddr);
 	fflush(stdout);
 #endif
@@ -292,9 +296,10 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	printSignatures();
 	// add current signature to the rdm
 	rdm.addSignature(
-			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	FILE* out = tls->out;
 	fprintf(out, "--- MUTEX UNLOCK ---\n");
 #endif
@@ -328,9 +333,10 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 	PrintRecordInfo(tid, COND_WAIT);
 
 #ifdef DEBUG_MODE
+
 	printf(
-			"Thread %d began waiting on condition variable[%lX] with lock[%lX].\n",
-			tid, condVarAddr, lockAddr);
+	    "Thread %d began waiting on condition variable[%lX] with lock[%lX].\n",
+	    tid, condVarAddr, lockAddr);
 	fflush(stdout);
 #endif
 
@@ -339,9 +345,10 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 	printSignatures();
 	// add current signature to the rdm
 	rdm.addSignature(
-			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	FILE* out = tls->out;
 	fprintf(out, "--- CONDITION WAIT ---\n");
 #endif
@@ -375,15 +382,17 @@ VOID AfterCondWait(THREADID tid)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
+
 	printf(
-			"Thread %d finished waiting on condition variable[%lX] with lock[%lX].\n",
-			tid, condVarAddr, lockAddr);
+	    "Thread %d finished waiting on condition variable[%lX] with lock[%lX].\n",
+	    tid, condVarAddr, lockAddr);
 	fflush(stdout);
 #endif
 
 	GetLock(&rdmLock, tid + 1);
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	FILE* out = tls->out;
 	fprintf(out, "--- COND WAKE UP ---\n");
 #endif
@@ -457,10 +466,11 @@ VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
 	printSignatures();
 	// add current signature to the rdm
 	rdm.addSignature(
-			new SigRaceData(tid, *(tls->vectorClock), *(tls->readBloomFilter),
-					*(tls->writeBloomFilter)));
+	    new SigRaceData(tid, *(tls->vectorClock), *(tls->readBloomFilter),
+	                    *(tls->writeBloomFilter)));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	fprintf(tls->out, "--- BEFORE BARRIER WAIT ---\n");
 #endif
 
@@ -471,6 +481,7 @@ VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
 	tls->vectorClock->advance();
 
 #ifdef DEBUG_MODE
+
 	printf("%d is entering into the barrier %ld\n", tid, barrier);
 	tls->vectorClock->printVector(stdout);
 	fflush(stdout);
@@ -521,6 +532,7 @@ VOID AfterBarrierWait(int returnCode, THREADID tid)
 	tls->vectorClock->receiveAction(barrierData->previousVectorClock);
 
 #ifdef DEBUG_MODE
+
 	printf("%d is exiting after the barrier %ld\n", tid, barrierAddr);
 	tls->vectorClock->printVector(stdout);
 	fflush(stdout);
@@ -545,8 +557,9 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 #ifdef DEBUG_MODE
+
 	printf("Thread %d signalled a condition variable[%lX].\n", tid,
-			condVarAddr);
+	       condVarAddr);
 	fflush(stdout);
 #endif
 
@@ -555,9 +568,10 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 	printSignatures();
 	// add current signature to the rdm
 	rdm.addSignature(
-			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+
 	FILE* out = tls->out;
 	fprintf(out, "--- SIGNAL ---\n");
 #endif
@@ -587,7 +601,7 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR) TurnInstrumentationOff,
-				IARG_THREAD_ID, IARG_END);
+		               IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -596,7 +610,7 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, (AFUNPTR) TurnInstrumentationOn,
-				IARG_THREAD_ID, IARG_END);
+		               IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -606,9 +620,9 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeLock),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterLock), IARG_THREAD_ID,
-		IARG_END);
+		               IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -617,9 +631,9 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeLock),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterTryLock),
-				IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -628,7 +642,7 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeUnlock),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -639,10 +653,10 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondWait),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE,
-				1, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE,
+		               1, IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterCondWait),
-				IARG_THREAD_ID, IARG_END);
+		               IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -651,7 +665,7 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondSignal),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -660,7 +674,7 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondBroadcast),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -669,9 +683,9 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeBarrierWait),
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
 		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterBarrierWait),
-				IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
+		               IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
 		RTN_Close(rtn);
 	}
 
@@ -680,8 +694,8 @@ VOID ImageLoad(IMG img, VOID *)
 	{
 		RTN_Open(rtn);
 		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeBarrierInit),
-				IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
+		               IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+		               IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
 		RTN_Close(rtn);
 	}
 }
