@@ -48,6 +48,7 @@ INT32 Usage()
 }
 
 /* ### MY ADDITIONS ################################################ */
+
 //#define ENABLE_REEXECUTE_DEBUG
 
 typedef vector<VectorClock> EpochList;
@@ -94,6 +95,9 @@ ThreadCreateOrder threadCreateOrder;
 ThreadCreateOrderItr currentCreateOrder;
 
 ThreadIdMap threadIdMap;
+
+// Global Re-execution Timestamp
+VectorClock GRT;
 
 /* ### MY ADDITIONS ################################################ */
 
@@ -264,6 +268,8 @@ void* thread_function(void* arg)
 }
 */
 
+//#define ENABLE_GRT_CHECK
+
 VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
                   __const pthread_attr_t *__restrict __attr,
                   void *(*__start_routine)(void *), void *__restrict __arg)
@@ -274,6 +280,10 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 	//this is slighly different than others
 	pair<UINT32, SIZE> temp_pair;
 
+#ifdef ENABLE_GRT_CHECK
+	ThreadLocalStorage* tls = getTLS(tid);
+#endif
+
 	while (true)
 	{
 		GetLock(&atomic_create, tid + 1);
@@ -281,7 +291,11 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 
 		CreateInfo ci = *currentCreateOrder;
 
+#ifdef ENABLE_GRT_CHECK
+//		if (tid == ci.parent && tls->currentVC.lessThanGRT(GRT))
+#else
 		if (tid == ci.parent)
+#endif
 			break;
 		else
 		{
@@ -290,6 +304,11 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 			PIN_Sleep(SLEEP_TIME);
 		}
 	}
+
+#ifdef ENABLE_GRT_CHECK
+//	GRT.updateGRT(tls->currentVC);
+//	cout << "GRT after create: \n" << GRT << endl;
+#endif
 
 	ReleaseLock(&index_lock);
 }

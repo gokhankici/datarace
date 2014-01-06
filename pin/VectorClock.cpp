@@ -192,6 +192,19 @@ bool VectorClock::areConcurrent(VectorClock& input, ADDRINT processId)
 	return !happensBefore(input) && !input.happensBefore(*this);
 }
 
+bool VectorClock::lessThanGRT(const VectorClock& GRT)
+{
+	for (int i = 0; i < totalProcessCount; ++i)
+		if (i != threadId && vc[i] > GRT.vc[i])
+			return false;
+	return true;
+}
+
+void VectorClock::updateGRT(const VectorClock& TRT)
+{
+	vc[TRT.threadId] = TRT.vc[TRT.threadId];
+}
+
 void VectorClock::toString()
 {
 	//cout << "segmentId:" << processId << "\t";

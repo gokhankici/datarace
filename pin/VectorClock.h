@@ -48,6 +48,10 @@ public:
 	bool areConcurrent(VectorClock& vectorClockReceived, ADDRINT processId);
 	bool isUniqueValue(int processIdIn);
 
+	// re-execute helper methods
+	bool lessThanGRT(const VectorClock& GRT);
+	void updateGRT(const VectorClock& TRT);
+
 	// operators
 	VectorClock& operator++(); //prefix increment ++vclock
 	VectorClock operator++(int x); //postfix increment
