@@ -8,6 +8,9 @@
 #ifndef VECTORCLOCK_H_
 #define VECTORCLOCK_H_
 
+#include <iostream>
+#include <istream>
+
 #include "pin.H"
 
 #define NON_THREAD_VECTOR_CLOCK -1
@@ -26,6 +29,7 @@ public:
 	VectorClock(const VectorClock& copyVC);
 	VectorClock(int processId);
 	VectorClock(VectorClock& inClockPtr, int processId);
+	VectorClock(std::istream& in, int processId);
 	~VectorClock();
 
 	// actions

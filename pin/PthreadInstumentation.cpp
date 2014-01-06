@@ -214,7 +214,6 @@ VOID AfterLock(THREADID tid)
 
 	PrintRecordInfo(tid, LOCK);
 
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -232,6 +231,7 @@ VOID AfterLock(THREADID tid)
 			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+	FILE* out = tls->out;
 	fprintf(out, "--- MUTEX LOCK ---\n");
 #endif
 
@@ -278,7 +278,6 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	PrintRecordInfo(tid, UNLOCK);
 
 	ThreadLocalStorage* tls = getTLS(tid);
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -296,6 +295,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+	FILE* out = tls->out;
 	fprintf(out, "--- MUTEX UNLOCK ---\n");
 #endif
 
@@ -313,7 +313,6 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -343,6 +342,7 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+	FILE* out = tls->out;
 	fprintf(out, "--- CONDITION WAIT ---\n");
 #endif
 
@@ -370,7 +370,6 @@ VOID AfterCondWait(THREADID tid)
 
 	PrintRecordInfo(tid, COND_WAIT);
 
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -385,6 +384,7 @@ VOID AfterCondWait(THREADID tid)
 	GetLock(&rdmLock, tid + 1);
 
 #ifdef PRINT_SYNC_FUNCTION
+	FILE* out = tls->out;
 	fprintf(out, "--- COND WAKE UP ---\n");
 #endif
 
@@ -540,7 +540,6 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 	PrintRecordInfo(tid, COND_SIGNAL);
 
 	ThreadLocalStorage* tls = getTLS(tid);
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -559,6 +558,7 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 			new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
 
 #ifdef PRINT_SYNC_FUNCTION
+	FILE* out = tls->out;
 	fprintf(out, "--- SIGNAL ---\n");
 #endif
 

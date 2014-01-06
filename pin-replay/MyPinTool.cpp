@@ -9,10 +9,20 @@
 #include "pin.H"
 #include <semaphore.h>
 
+/* MY ADDITIONS */
+#include <assert.h>
+#include <string.h>
+#include <stdio.h>
+
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <string>
+
 #include "../pin/RecordNReplay.h"
 #include "../pin/VectorClock.h"
 #include "../pin/SigraceModules.h"
-#include <assert.h>
+/* MY ADDITIONS */
 
 /* KNOB parameters */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "output",
@@ -25,6 +35,10 @@ KNOB<string> KnobCreateFile(KNOB_MODE_WRITEONCE, "pintool", "createFile",
                             "../pin/create.txt",
                             "specify create file to order the thread creations");
 
+KNOB<string> KnobEpochFile(KNOB_MODE_WRITEONCE, "pintool", "epochFile",
+                           "../pin/thread_epochs.",
+                           "specify create file to order the thread creations");
+
 INT32 Usage()
 {
 	cerr << "This tool replays a multithread program." << endl;
@@ -32,6 +46,28 @@ INT32 Usage()
 	cerr << endl;
 	return 1;
 }
+
+class ThreadLocalStorage
+{
+public:
+	FILE* out;
+	vector<VectorClock> epochList;
+
+	ThreadLocalStorage()
+	{
+		out = NULL;
+	}
+
+	~ThreadLocalStorage()
+	{
+		// make sure the file is closed
+		if(out)
+		{
+			fclose(out);
+		}
+	}
+};
+TLS_KEY tlsKey;
 
 typedef pair<UINT32, pair<UINT32, SIZE> > RECORD_PAIR;
 
@@ -157,7 +193,6 @@ void logToFile(const char * name, const vector<RECORD_PAIR> & v, THREADID tid, P
 	}
 	ReleaseLock(lock);
 	OutFile.close();
-
 }
 
 /*
@@ -660,16 +695,6 @@ addInstrumentation(IMG img, const char * name, char position, int parameterCount
 	}
 }
 
-VOID BeforeKare(THREADID tid, int x)
-{
-	printf("kare(%d) function'in dasin !!!\n", x);
-}
-
-VOID AfterKare(THREADID tid, int rc)
-{
-	printf("kare(...) = %d\n", rc);
-}
-
 // Image load callback - inserts the probes.
 void ImgLoad(IMG img, void *v)
 {
@@ -683,27 +708,61 @@ void ImgLoad(IMG img, void *v)
 	if(IMG_IsMainExecutable(img))
 	{
 		addInstrumentation(img, "main", INSTRUMENT_BEFORE, 2, AFUNPTR(BeforeMain), NULL);
-		addInstrumentation(img, "kare", INSTRUMENT_BOTH, 1, AFUNPTR(BeforeKare), AFUNPTR(AfterKare));
 	}
 }
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
+	/*
+	// check for correct thread id at creation
 	threadIdMap[PIN_GetTid()] = tid;
 
 	INT32 parentOS_TID = PIN_GetParentTid();
 	if (parentOS_TID)
-	{
+{
 		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
 		assert(parentTidItr != threadIdMap.end());
 		THREADID parentTID = parentTidItr->second;
 
 		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
-	}
+}
 	else
-	{
+{
 		printf("Thread %d is started (root thread)\n", tid);
+}
+	*/
+
+	ThreadLocalStorage* tls = new ThreadLocalStorage();
+
+
+	char epochFileName[30] = {'\0'};
+	sprintf(epochFileName, "%s%d", KnobEpochFile.Value().c_str(), tid);
+	ifstream infile(epochFileName);
+
+	while (infile)
+	{
+		string s;
+		if (!getline( infile, s ))
+		{
+			break;
+		}
+
+		istringstream ss( s );
+		vector <int> record;
+
+		tls->epochList.push_back(VectorClock(ss, tid));
 	}
+
+	GetLock(&id_lock, tid + 1);
+	cout << "Printing epoch list of thread " << tid << endl;
+	vector<VectorClock>::size_type data_i_size;
+	for (vector< VectorClock >::size_type i = 0; i < tls->epochList.size(); i++)
+	{
+		cout << i << " : " << tls->epochList[i];
+	}
+	ReleaseLock(&id_lock);
+
+	PIN_SetThreadData(tlsKey, tls, tid);
 }
 
 /* ===================================================================== */

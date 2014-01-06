@@ -7,7 +7,7 @@
 #include "SigraceModules.h"
 #include "Bloom.h"
 
-#define PRINT_SYNC_FUNCTION
+//#define PRINT_SYNC_FUNCTION
 
 extern PIN_LOCK rdmLock;
 
