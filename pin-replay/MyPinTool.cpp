@@ -51,7 +51,7 @@ INT32 Usage()
 /* ### MY DEFINITIONS ################################################ */
 // enable debug messages
 // TODO: remove this later
-#define ENABLE_REEXECUTE_DEBUG
+//#define ENABLE_REEXECUTE_DEBUG
 
 // extra verification by calculating the vector clock explicitly
 // and comparing it with TRT
@@ -318,8 +318,9 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 	while (true)
 	{
 		GetLock(&atomic_create, tid + 1);
-		GetLock(&index_lock, tid + 1);
+		GetLock(&GRTLock, tid + 1);
 
+		assert(currentCreateOrder != threadCreateOrder.end());
 		CreateInfo ci = *currentCreateOrder;
 
 #ifdef ENABLE_GRT_CHECK
@@ -342,7 +343,7 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 #endif
 		else
 		{
-			ReleaseLock(&index_lock);
+			ReleaseLock(&GRTLock);
 			ReleaseLock(&atomic_create);
 			PIN_Sleep(SLEEP_TIME);
 		}
@@ -361,7 +362,7 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 
 	advanceTRT(tls);
 
-	ReleaseLock(&index_lock);
+	ReleaseLock(&GRTLock);
 }
 
 VOID AfterCreate(THREADID tid, int rc)
@@ -374,6 +375,15 @@ VOID BeforeJoin(THREADID tid, pthread_t thread, void **retval)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	assert(tls);
+
+#ifdef ENABLE_GRT_CHECK
+	GetLock(&GRTLock, tid + 1);
+	assert(tls->TRT.lessThanGRT(GRT));
+	GRT.updateGRT(tls->TRT);
+	ReleaseLock(&GRTLock);
+#endif
+
+	advanceTRT(tls);
 }
 
 /*
@@ -726,7 +736,12 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	// Thread should be able to start
 	GetLock(&GRTLock, tid + 1);
+
+#ifdef ENABLE_REEXECUTE_DEBUG
+
 	cout << "ThreadStart\nGRT: " << GRT << "TRT: " << tls->TRT;
+#endif
+
 	assert(tls->TRT.lessThanGRT(GRT));
 	ReleaseLock(&GRTLock);
 
@@ -735,7 +750,11 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	// update the TLS for upcoming sync operations
 	tls->currentVC = tls->TRT;
 	advanceTRT(tls);
+
+#ifdef ENABLE_REEXECUTE_DEBUG
+
 	cout << "next TLS after start: " << tls->TRT << endl;
+#endif
 
 #ifdef CALCULATE_VECTOR_CLOCK
 	// check for correct thread id at creation
@@ -761,30 +780,10 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		assert(tls->currentVC == calculatedVC);
 
 		ReleaseLock(&threadStartLock);
-
-#ifdef asasasasas
-
-		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
-		cout << tls->currentVC;
-#endif
-
 	}
-#endif
-
-
-	//#ifdef ENABLE_REEXECUTE_DEBUG
-#ifdef hashashshdfsdf
-	cout << "Printing epoch list of thread " << tid << endl;
-	vector<VectorClock>::size_type data_i_size;
-	for (vector< VectorClock >::size_type i = 0; i < tls->epochList.size(); i++)
-	{
-		cout << i << " : " << tls->epochList[i];
-	}
-	cout << endl;
 #endif
 
 	PIN_SetThreadData(tlsKey, tls, tid);
-
 }
 
 /* ===================================================================== */
