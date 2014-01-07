@@ -47,19 +47,34 @@ INT32 Usage()
 	return 1;
 }
 
+
+/* ### MY DEFINITIONS ################################################ */
+// enable debug messages
+// TODO: remove this later
+#define ENABLE_REEXECUTE_DEBUG
+
+// extra verification by calculating the vector clock explicitly
+// and comparing it with TRT
+#define CALCULATE_VECTOR_CLOCK
+
+// do the GRT >= TRT check
+// TODO: remove this later
+#define ENABLE_GRT_CHECK
+/* ### MY DEFINITIONS ################################################ */
+
+
 /* ### MY ADDITIONS ################################################ */
-
-//#define ENABLE_REEXECUTE_DEBUG
-
-typedef vector<VectorClock> EpochList;
+typedef deque<VectorClock> EpochList;
 typedef EpochList::iterator EpochListIterator;
 
 class ThreadLocalStorage
 {
 public:
-	FILE* out;
-	EpochList epochList;
-	VectorClock currentVC;
+	FILE* out;                        // ?????
+	EpochList epochList;              // Epoch history coming from normal execution
+	VectorClock currentVC;            // Current vector clock of the thread
+	VectorClock TRT;                  // Next vector clock of the thread
+	deque<VectorClock> createVCList;  // List of vc taken at thread creation times
 
 	ThreadLocalStorage()
 	{
@@ -75,6 +90,7 @@ public:
 		}
 	}
 };
+
 TLS_KEY tlsKey;
 
 inline static
@@ -83,12 +99,24 @@ ThreadLocalStorage* getTLS(THREADID tid)
 	return static_cast<ThreadLocalStorage*> (PIN_GetThreadData(tlsKey, tid));
 }
 
+/*
+ * Advances the TRT and returns true if TRT is successfully advanced
+ */
 inline static
-void verifyVectorClock(ThreadLocalStorage* tls)
+bool advanceTRT(ThreadLocalStorage* tls)
 {
-	EpochListIterator itr = tls->epochList.begin();
-	assert(*itr == tls->currentVC);
-	tls->epochList.pop_back();
+	assert(tls);
+	if(! tls->epochList.empty())
+	{
+		tls->currentVC = tls->TRT;
+
+		EpochListIterator itr = tls->epochList.begin();
+		tls->TRT = *itr;
+
+		tls->epochList.pop_front();
+		return true;
+	}
+	return false;
 }
 
 ThreadCreateOrder threadCreateOrder;
@@ -98,6 +126,7 @@ ThreadIdMap threadIdMap;
 
 // Global Re-execution Timestamp
 VectorClock GRT;
+PIN_LOCK GRTLock;
 
 /* ### MY ADDITIONS ################################################ */
 
@@ -268,7 +297,7 @@ void* thread_function(void* arg)
 }
 */
 
-//#define ENABLE_GRT_CHECK
+
 
 VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
                   __const pthread_attr_t *__restrict __attr,
@@ -281,7 +310,9 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 	pair<UINT32, SIZE> temp_pair;
 
 #ifdef ENABLE_GRT_CHECK
+
 	ThreadLocalStorage* tls = getTLS(tid);
+	assert(tls);
 #endif
 
 	while (true)
@@ -292,11 +323,23 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 		CreateInfo ci = *currentCreateOrder;
 
 #ifdef ENABLE_GRT_CHECK
-//		if (tid == ci.parent && tls->currentVC.lessThanGRT(GRT))
-#else
-		if (tid == ci.parent)
+
+#ifdef ENABLE_REEXECUTE_DEBUG
+
+		cout << "Create\nGRT: " << GRT << "TRT: " << tls->TRT << endl;
 #endif
+
+		if (tid == ci.parent && tls->TRT.lessThanGRT(GRT))
+		{
 			break;
+		}
+#else
+
+		if (tid == ci.parent)
+		{
+			break;
+		}
+#endif
 		else
 		{
 			ReleaseLock(&index_lock);
@@ -305,10 +348,17 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 		}
 	}
 
+	tls->createVCList.push_back(tls->currentVC);
+
 #ifdef ENABLE_GRT_CHECK
-//	GRT.updateGRT(tls->currentVC);
-//	cout << "GRT after create: \n" << GRT << endl;
+	GRT.updateGRT(tls->TRT);
+#ifdef ENABLE_REEXECUTE_DEBUG
+
+	cout << "GRT after create: \n" << GRT << endl;
 #endif
+#endif
+
+	advanceTRT(tls);
 
 	ReleaseLock(&index_lock);
 }
@@ -642,47 +692,13 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
 	ThreadLocalStorage* tls = new ThreadLocalStorage();
 
-	GetLock(&threadStartLock, tid + 1);
-
-	// check for correct thread id at creation
-	threadIdMap[PIN_GetTid()] = tid;
-
-	INT32 parentOS_TID = PIN_GetParentTid();
-	if (parentOS_TID)
-	{
-		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
-		assert(parentTidItr != threadIdMap.end());
-		THREADID parentTID = parentTidItr->second;
-		ThreadLocalStorage* parentTLS = getTLS(parentTID);
-		tls->currentVC = VectorClock(parentTLS->currentVC, tid);
-
-		parentTLS->currentVC.advance();
-#ifdef ENABLE_REEXECUTE_DEBUG
-
-		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
-#endif
-
-	}
-	else
-	{
-		tls->currentVC = VectorClock(tid);
-#ifdef ENABLE_REEXECUTE_DEBUG
-
-		printf("Thread %d is started (root thread)\n", tid);
-#endif
-
-	}
-
-#ifdef ENABLE_REEXECUTE_DEBUG
-	cout << tls->currentVC;
-#endif
-
-	char epochFileName[30] =
-	    {'\0'
-	    };
+	// create the stream to read the epochs
+	char epochFileName[30];
 	sprintf(epochFileName, "%s%d", KnobEpochFile.Value().c_str(), tid);
+
 	ifstream infile(epochFileName);
 
+	// read epochs into memory
 	while (infile)
 	{
 		string s;
@@ -697,9 +713,60 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		tls->epochList.push_back(VectorClock(ss, tid));
 	}
 
-	verifyVectorClock(tls);
+	// load the first TRT
+	bool emptyEpochListCheck = advanceTRT(tls);
+	assert(emptyEpochListCheck);
+
+	// Thread should be able to start
+	GetLock(&GRTLock, tid + 1);
+	cout << "ThreadStart\nGRT: " << GRT << "TRT: " << tls->TRT;
+	assert(tls->TRT.lessThanGRT(GRT));
+	ReleaseLock(&GRTLock);
+
+	GRT.updateGRT(tls->TRT);
+
+	// update the TLS for upcoming sync operations
+	tls->currentVC = tls->TRT;
+	advanceTRT(tls);
+	cout << "next TLS after start: " << tls->TRT << endl;
+
+#ifdef CALCULATE_VECTOR_CLOCK
+	// check for correct thread id at creation
+	threadIdMap[PIN_GetTid()] = tid;
+
+	INT32 parentOS_TID = PIN_GetParentTid();
+	if (parentOS_TID)
+	{
+		GetLock(&threadStartLock, tid + 1);
+
+		// get parent tid from map
+		ThreadIdMapItr parentTidItr = threadIdMap.find(parentOS_TID);
+		assert(parentTidItr != threadIdMap.end());
+		THREADID parentTID = parentTidItr->second;
+
+		// calculate vector clock
+		ThreadLocalStorage* parentTLS = getTLS(parentTID);
+		assert(parentTLS);
+		VectorClock calculatedVC(parentTLS->createVCList.front(), tid);
+		parentTLS->createVCList.pop_front();
+
+		// compare it with TRT
+		assert(tls->currentVC == calculatedVC);
+
+		ReleaseLock(&threadStartLock);
+
 #ifdef ENABLE_REEXECUTE_DEBUG
 
+		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
+		cout << tls->currentVC;
+#endif
+
+	}
+#endif
+
+
+//#ifdef ENABLE_REEXECUTE_DEBUG
+#ifdef hashashshdfsdf
 	cout << "Printing epoch list of thread " << tid << endl;
 	vector<VectorClock>::size_type data_i_size;
 	for (vector< VectorClock >::size_type i = 0; i < tls->epochList.size(); i++)
@@ -711,7 +778,6 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	PIN_SetThreadData(tlsKey, tls, tid);
 
-	ReleaseLock(&threadStartLock);
 }
 
 /* ===================================================================== */
@@ -822,15 +888,17 @@ int main(int argc, char *argv[])
 		return Usage();
 	}
 
+	InitLock(&atomic_create);
+	InitLock(&index_lock);
+	InitLock(&threadStartLock);
+	InitLock(&GRTLock);
+
 	InitLock(&vector_lock);
 	InitLock(&mutex_map_lock);
 	InitLock(&cond_map_lock);
 	InitLock(&barrier_map_lock);
 	InitLock(&id_lock);
-	InitLock(&index_lock);
 	InitLock(&out_lock);
-	InitLock(&atomic_create);
-	InitLock(&threadStartLock);
 
 	// Register the instrumentation callback
 	IMG_AddInstrumentFunction(ImgLoad, 0);

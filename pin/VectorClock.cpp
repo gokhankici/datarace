@@ -194,6 +194,8 @@ bool VectorClock::areConcurrent(VectorClock& input, ADDRINT processId)
 
 bool VectorClock::lessThanGRT(const VectorClock& GRT)
 {
+	assert(GRT.threadId == NON_THREAD_VECTOR_CLOCK);
+
 	for (int i = 0; i < totalProcessCount; ++i)
 		if (i != threadId && vc[i] > GRT.vc[i])
 			return false;
@@ -202,6 +204,8 @@ bool VectorClock::lessThanGRT(const VectorClock& GRT)
 
 void VectorClock::updateGRT(const VectorClock& TRT)
 {
+	assert(threadId == NON_THREAD_VECTOR_CLOCK);
+
 	vc[TRT.threadId] = TRT.vc[TRT.threadId];
 }
 
