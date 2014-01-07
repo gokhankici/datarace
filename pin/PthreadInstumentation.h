@@ -6,8 +6,7 @@
 #include "MultiCacheSim_PinDriver.h"
 #include "SigraceModules.h"
 #include "Bloom.h"
-
-//#define PRINT_SYNC_FUNCTION
+#include "MyFlags.h"
 
 extern PIN_LOCK rdmLock;
 
@@ -43,21 +42,19 @@ VOID ImageLoad(IMG img, VOID *);
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v);
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v);
 
-VOID BeforeLock(ADDRINT lockAddr, THREADID tid);
-VOID AfterLock(THREADID tid);
+VOID BeforeLock(THREADID tid, ADDRINT lockAddr);
+VOID AfterLock(THREADID tid, int returnValue);
+VOID AfterTryLock(THREADID tid, int returnValue);
+VOID BeforeUnlock(THREADID tid, ADDRINT lockAddr);
 
-VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid);
+VOID BeforeCondWait(THREADID tid, ADDRINT condVarAddr, ADDRINT lockAddr);
+VOID AfterCondWait(THREADID tid, int returnValue);
+VOID BeforeCondSignal(THREADID tid, ADDRINT condVarAddr);
+VOID BeforeCondBroadcast(THREADID tid, ADDRINT condVarAddr);
 
-VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID id);
-VOID AfterCondWait(THREADID id);
-
-VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, int size);
-VOID BeforeBarrierWait(ADDRINT barrier, THREADID id);
-VOID AfterBarrierWait(int returnCode, THREADID id);
-
-VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID id);
-VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID id);
-VOID AfterCondBroadcast(ADDRINT condVarAddr, THREADID id);
+VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, ADDRINT barrierAttr, int size);
+VOID BeforeBarrierWait(THREADID tid, ADDRINT barrier);
+VOID AfterBarrierWait(THREADID tid, int returnValue);
 
 VOID Fini(INT32 code, VOID *v);
 

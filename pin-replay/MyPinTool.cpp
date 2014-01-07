@@ -351,6 +351,7 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 	tls->createVCList.push_back(tls->currentVC);
 
 #ifdef ENABLE_GRT_CHECK
+
 	GRT.updateGRT(tls->TRT);
 #ifdef ENABLE_REEXECUTE_DEBUG
 
@@ -367,6 +368,12 @@ VOID AfterCreate(THREADID tid, int rc)
 {
 	currentCreateOrder++;
 	ReleaseLock(&atomic_create);
+}
+
+VOID BeforeJoin(THREADID tid, pthread_t thread, void **retval)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	assert(tls);
 }
 
 /*
@@ -755,7 +762,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 		ReleaseLock(&threadStartLock);
 
-#ifdef ENABLE_REEXECUTE_DEBUG
+#ifdef asasasasas
 
 		printf("Thread %d is started (parent tid : %d)\n", tid, parentTID);
 		cout << tls->currentVC;
@@ -765,7 +772,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 #endif
 
 
-//#ifdef ENABLE_REEXECUTE_DEBUG
+	//#ifdef ENABLE_REEXECUTE_DEBUG
 #ifdef hashashshdfsdf
 	cout << "Printing epoch list of thread " << tid << endl;
 	vector<VectorClock>::size_type data_i_size;

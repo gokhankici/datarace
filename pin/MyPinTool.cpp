@@ -52,8 +52,6 @@ KNOB<string> KnobProtocol(KNOB_MODE_WRITEONCE, "pintool", "protos",
 KNOB<string> KnobCreateFile(KNOB_MODE_WRITEONCE, "pintool", "createFile",
 		"create.txt", "specify create file to order the thread creations");
 
-#define ON_MY_MACHINE
-
 #ifdef ON_MY_MACHINE
 KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
 		"/home/gokhan/Applications/pin-2.12-55942-gcc.4.4.7-linux/source/tools/datarace/"

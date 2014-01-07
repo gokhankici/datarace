@@ -24,7 +24,7 @@ Bloom::Bloom()
 	int nfuncs = 1;
 
 	filter = (unsigned char *) calloc((size + CHAR_BIT - 1) / CHAR_BIT,
-			sizeof(char));
+	                                  sizeof(char));
 	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
 	funcs[0] = defaultHashFunction;
@@ -39,7 +39,7 @@ Bloom::Bloom(int size, int nfuncs, ...)
 	va_list l;
 
 	filter = (unsigned char *) calloc((size + CHAR_BIT - 1) / CHAR_BIT,
-			sizeof(char));
+	                                  sizeof(char));
 	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
 	va_start(l, nfuncs);
@@ -96,13 +96,14 @@ const Bloom& Bloom::operator=(const Bloom& bloom)
 	elementCount = bloom.elementCount;
 
 	filter = (unsigned char *) calloc((filterSize + CHAR_BIT - 1) / CHAR_BIT,
-			sizeof(char));
+	                                  sizeof(char));
 	funcs = (hashfunc_t*) malloc(nfuncs * sizeof(hashfunc_t));
 
 	memcpy(filter, bloom.filter, (filterSize + CHAR_BIT - 1) / CHAR_BIT);
 	memcpy(funcs, bloom.funcs, nfuncs * sizeof(hashfunc_t));
 
 #ifdef SET_OVERRIDE
+
 	locations = bloom.locations;
 #endif
 
@@ -128,6 +129,7 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 #ifdef DEBUG_MODE
 			printf("%02X / %02X (%d) === Bits: %d | Bytes: %d | Byte#: %d\n", filter[n], bloom.filter[n], same, filterSize, byteCount, n);
 #endif
+
 			return true;
 		}
 		same++;
@@ -135,22 +137,23 @@ bool Bloom::hasInCommon(const Bloom& bloom)
 
 	return false;
 #else
+
 	std::vector<ADDRINT> v_intersection;
 	std::set_intersection(locations.begin(), locations.end(),
-			bloom.locations.begin(), bloom.locations.end(),
-			std::back_inserter(v_intersection));
+	                      bloom.locations.begin(), bloom.locations.end(),
+	                      std::back_inserter(v_intersection));
 
 	if (v_intersection.size())
 	{
 		cout << "Filter 1" << endl;
 		for (std::set<ADDRINT>::iterator it = locations.begin();
-				it != locations.end(); ++it)
+		        it != locations.end(); ++it)
 			printf("%lX, ", *it);
 		printf("\n");
 
 		cout << "Filter 2" << endl;
 		for (std::set<ADDRINT>::iterator it = bloom.locations.begin();
-				it != bloom.locations.end(); ++it)
+		        it != bloom.locations.end(); ++it)
 			printf("%lX, ", *it);
 		printf("\n");
 
@@ -180,6 +183,7 @@ bool Bloom::check(const unsigned char *s)
 	}
 	return true;
 #else
+
 	return locations.find(*((ADDRINT*) s)) != locations.end();
 #endif
 }
@@ -190,6 +194,7 @@ void Bloom::clear()
 	elementCount = 0;
 
 #ifdef SET_OVERRIDE
+
 	locations.clear();
 #endif
 }
@@ -219,4 +224,16 @@ void Bloom::print(FILE* out)
 		fprintf(out, "%02X", filter[i]);
 	}
 	fprintf(out, "\n");
+}
+
+ostream& operator<<(ostream& os, const Bloom& v)
+{
+#ifdef SET_OVERRIDE
+	for(set<ADDRINT>::iterator itr = v.locations.begin(); itr != v.locations.end(); itr++)
+	{
+		os << *itr << ", ";
+	}
+	os << endl;
+#endif
+	return os;
 }

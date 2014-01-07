@@ -6,13 +6,11 @@
 
 #include <vector>
 #include <set>
+#include "MyFlags.h"
 
 #define DEFAULT_BLOOM_FILTER_SIZE 2048
 #define ADDR_SIZE 8
 #define BLOOM_ADDR(address) ((const unsigned char*) &address)
-
-// when defined, replace the bloom filter with a std::set
-//#define SET_OVERRIDE
 
 typedef unsigned int (*hashfunc_t)(const unsigned char *);
 
@@ -34,6 +32,8 @@ public:
 	bool isEmpty();
 	void print(FILE* out);
 
+	friend ostream& operator<<(ostream& os, const Bloom &v);
+
 	const unsigned char* getFilter()
 	{
 		return filter;
@@ -44,7 +44,7 @@ public:
 		return filterSize;
 	}
 
-	int getFilterSizeInBytes()
+	int getFilterSizeInBytes() const
 	{
 		return (filterSize + 7) / 8;
 	}

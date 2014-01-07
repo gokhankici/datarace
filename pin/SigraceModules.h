@@ -13,6 +13,7 @@
 #include "Bloom.h"
 #include "VectorClock.h"
 #include "RecordNReplay.h"
+#include "MyFlags.h"
 
 #define NO_ID ((UINT32) 0xFFFFFFFF)
 #define BLOCK_HISTORY_QUEUE_SIZE 16
@@ -187,7 +188,7 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
-#ifdef DEBUG_MODE
+#ifdef PRINT_DETAILED_RACE_INFO
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
@@ -202,7 +203,7 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
-#ifdef DEBUG_MODE
+#ifdef PRINT_DETAILED_RACE_INFO
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
@@ -216,7 +217,7 @@ public:
 					fprintf(stderr,
 							"THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
 							sigRaceData->tid, other->tid);
-#ifdef DEBUG_MODE
+#ifdef PRINT_DETAILED_RACE_INFO
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);

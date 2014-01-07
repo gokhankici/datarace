@@ -3,12 +3,11 @@
 
 #include "pin.H"
 #include "SigraceModules.h"
+#include "MyFlags.h"
+#include <deque>
 
 #define CONVERT(type, data_ptr) ((type)((void*)data_ptr))
 #define GET_ADDR(data_ptr) CONVERT(long, data_ptr)
-
-// when enabled, print the debugging messages to the screen
-//#define DEBUG_MODE
 
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
@@ -20,6 +19,10 @@ class ThreadLocalStorage
 public:
 	FILE* out;
 	VectorClock* vectorClock;
+
+	deque<VectorClock> createVCList;
+	deque<VectorClock> joinVCList;
+
 	Bloom* readBloomFilter;
 	Bloom* writeBloomFilter;
 	ADDRINT lockAddr;

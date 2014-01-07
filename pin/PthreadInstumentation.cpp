@@ -33,9 +33,7 @@ static void printSignatures(THREADID tid)
 
 #ifdef DEBUG_MODE
 
-	printf("Thread %d:\n", tid);
-	printf("\tVC: ");
-	cout << *vectorClock << endl;
+	cout << *vectorClock << "read: " << *tls->readBloomFilter << "write: " << *tls->writeBloomFilter << endl;
 	fflush(stdout);
 #endif
 
@@ -48,7 +46,7 @@ static void printSignatures()
 	return printSignatures(PIN_ThreadId());
 }
 
-/**
+/*
  * Initialize the thread local storage and create the vector clock of the thread
  */
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -85,32 +83,11 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		threadCreateOrder.push_back(thisThreadInfo);
 
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
+		assert(parentTls);
 
-		VectorClock* parentVC = parentTls->vectorClock;
-		Bloom* parentRead = parentTls->readBloomFilter;
-		Bloom* parentWrite = parentTls->writeBloomFilter;
-
-		// add parent's read/write info to the module
-		GetLock(&rdmLock, tid + 1);
-		tls->vectorClock = new VectorClock(*parentVC, (int) tid);
-
-		printSignatures(parentTID);
-
-		// add current signature to the rdm
-		rdm.addSignature(
-		    new SigRaceData(parentTID, *parentVC, *parentRead,
-		                    *parentWrite));
-
-#ifdef PRINT_SYNC_FUNCTION
-
-		fprintf(parentTls->out, "--- PTHREAD CREATE %d---\n", tid);
-#endif
-
-		parentVC->advance();
-		parentRead->clear();
-		parentWrite->clear();
-
-		ReleaseLock(&rdmLock);
+		// calculate vector clock
+		tls->vectorClock = new VectorClock(parentTls->createVCList.front(), tid);
+		parentTls->createVCList.pop_front();
 	}
 	else
 	{
@@ -120,7 +97,6 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	ReleaseLock(&threadIdMapLock);
 
 	// create the log file
-
 	PIN_SetThreadData(tlsKey, tls, tid);
 }
 
@@ -137,15 +113,15 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* writeFilter = tls->writeBloomFilter;
 
 	GetLock(&rdmLock, tid + 1);
+
 	printSignatures();
-	rdm.addSignature(
-	    new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
+
 	ReleaseLock(&rdmLock);
 
 	vectorClock->advance();
 
 	/* update parent thread's vector clock with the finished child's */
-
 	GetLock(&threadIdMapLock, tid + 1);
 
 	// zero means the top of the process tree
@@ -158,34 +134,8 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 		THREADID parentTID = parentTidItr->second;
 
 		// get its vector clock
-		ThreadLocalStorage* parentTls = getTLS(parentTID);
-
-		// create vs from parent's clock
-		VectorClock* parentVC = parentTls->vectorClock;
-		Bloom* parentRead = parentTls->readBloomFilter;
-		Bloom* parentWrite = parentTls->writeBloomFilter;
-
-		GetLock(&rdmLock, tid + 1);
-
-		// save parent's current situation
-		printSignatures(parentTID);
-
-		rdm.addSignature(
-		    new SigRaceData(parentTID, *parentVC, *parentRead,
-		                    *parentWrite));
-
-#ifdef PRINT_SYNC_FUNCTION
-
-		fprintf(parentTls->out, "--- PTHREAD JOIN WITH %d---\n", tid);
-#endif
-
-		// update parent's vc
-		parentVC->receiveAction(*vectorClock);
-		parentVC->advance();
-		parentRead->clear();
-		parentWrite->clear();
-
-		ReleaseLock(&rdmLock);
+		ThreadLocalStorage* parentTLS = getTLS(parentTID);
+		parentTLS->joinVCList.push_back(*vectorClock);
 	}
 
 	ReleaseLock(&threadIdMapLock);
@@ -196,14 +146,87 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	PIN_SetThreadData(tlsKey, 0, tid);
 }
 
-// This routine is executed each time lock is called.
-VOID BeforeLock(ADDRINT lockAddr, THREADID tid)
+VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
+                  __const pthread_attr_t *__restrict __attr,
+                  void *(*__start_routine)(void *), void *__restrict __arg)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+
+	GetLock(&threadIdMapLock, tid + 1);
+	tls->createVCList.push_back(*(tls->vectorClock));
+	ReleaseLock(&threadIdMapLock);
+
+	GetLock(&rdmLock, tid + 1);
+
+	printSignatures();
+
+#ifdef PRINT_SYNC_FUNCTION
+
+	fprintf(tls->out, "--- PTHREAD CREATE ---\n");
+#endif
+
+	// add current signature to the rdm
+	rdm.addSignature(
+	    new SigRaceData(tid, *tls->vectorClock, *tls->readBloomFilter, *tls->writeBloomFilter));
+
+	tls->vectorClock->advance();
+	tls->readBloomFilter->clear();
+	tls->writeBloomFilter->clear();
+
+	ReleaseLock(&rdmLock);
+}
+
+#define SLEEP_TIME 10
+
+VOID AfterJoin(THREADID tid, int returnValue)
+{
+	//  dump the current values
+	ThreadLocalStorage* tls = getTLS(tid);
+
+	GetLock(&rdmLock, tid + 1);
+	printSignatures();
+
+#ifdef PRINT_SYNC_FUNCTION
+
+	fprintf(tls->out, "--- PTHREAD JOIN ---\n");
+#endif
+
+	// add current signature to the rdm
+	rdm.addSignature(
+	    new SigRaceData(tid, *tls->vectorClock, *tls->readBloomFilter, *tls->writeBloomFilter));
+
+	tls->vectorClock->advance();
+	tls->readBloomFilter->clear();
+	tls->writeBloomFilter->clear();
+	ReleaseLock(&rdmLock);
+
+	// first get the joined thread's vector clock
+	while(true)
+	{
+		GetLock(&threadIdMapLock, tid+1);
+		if(! tls->joinVCList.empty())
+		{
+			break;
+		}
+		else
+		{
+			ReleaseLock(&threadIdMapLock);
+			PIN_Sleep(SLEEP_TIME);
+		}
+	}
+
+	tls->vectorClock->receiveAction(tls->joinVCList.front());
+	tls->joinVCList.pop_front();
+	ReleaseLock(&threadIdMapLock);
+}
+
+VOID BeforeLock(THREADID tid, ADDRINT lockAddr)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	tls->lockAddr = lockAddr;
 }
 
-VOID AfterLock(THREADID tid)
+VOID AfterLock(THREADID tid, int returnValue)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	ADDRINT lockAddr = tls->lockAddr;
@@ -262,16 +285,16 @@ VOID AfterLock(THREADID tid)
 	writeFilter->clear();
 }
 
-VOID AfterTryLock(ADDRINT exitVal, THREADID tid)
+VOID AfterTryLock(THREADID tid, int returnValue)
 {
 	// if we got the lock, the procedure is the same as lock
-	if (exitVal == 0)
+	if (returnValue == 0)
 	{
-		AfterLock(tid);
+		AfterLock(tid, returnValue);
 	}
 }
 
-VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
+VOID BeforeUnlock(THREADID tid, ADDRINT lockAddr)
 {
 	if (lockAddr > MUTEX_POINTER_LIMIT)
 	{
@@ -315,7 +338,7 @@ VOID BeforeUnlock(ADDRINT lockAddr, THREADID tid)
 	writeFilter->clear();
 }
 
-VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
+VOID BeforeCondWait(THREADID tid, ADDRINT condVarAddr, ADDRINT lockAddr)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	VectorClock* vectorClock = tls->vectorClock;
@@ -364,7 +387,7 @@ VOID BeforeCondWait(ADDRINT condVarAddr, ADDRINT lockAddr, THREADID tid)
 	writeFilter->clear();
 }
 
-VOID AfterCondWait(THREADID tid)
+VOID AfterCondWait(THREADID tid, int returnValue)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	ADDRINT lockAddr = tls->lockAddr;
@@ -416,7 +439,7 @@ VOID AfterCondWait(THREADID tid)
 	writeFilter->clear();
 }
 
-VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, int size)
+VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, ADDRINT barrierAttr, int size)
 {
 	GetLock(&barrierLock, tid + 1);
 
@@ -443,7 +466,7 @@ VOID BeforeBarrierInit(THREADID tid, ADDRINT barrier, int size)
 	ReleaseLock(&barrierLock);
 }
 
-VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
+VOID BeforeBarrierWait(THREADID tid, ADDRINT barrier)
 {
 	PrintRecordInfo(tid, BARRIER_WAIT);
 
@@ -505,10 +528,10 @@ VOID BeforeBarrierWait(ADDRINT barrier, THREADID tid)
 
 }
 
-VOID AfterBarrierWait(int returnCode, THREADID tid)
+VOID AfterBarrierWait(THREADID tid, int returnValue)
 {
 	// an error occured while waiting in the barrier
-	if (returnCode != 0 && returnCode != PTHREAD_BARRIER_SERIAL_THREAD)
+	if (returnValue != 0 && returnValue != PTHREAD_BARRIER_SERIAL_THREAD)
 	{
 		return;
 	}
@@ -542,7 +565,7 @@ VOID AfterBarrierWait(int returnCode, THREADID tid)
 
 }
 
-VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
+VOID BeforeCondSignal(THREADID tid, ADDRINT condVarAddr)
 {
 	if (condVarAddr > MUTEX_POINTER_LIMIT)
 	{
@@ -587,10 +610,93 @@ VOID BeforeCondSignal(ADDRINT condVarAddr, THREADID tid)
 	writeFilter->clear();
 }
 
-VOID BeforeCondBroadcast(ADDRINT condVarAddr, THREADID tid)
+VOID BeforeCondBroadcast(THREADID tid, ADDRINT condVarAddr)
 {
 	PrintRecordInfo(tid, COND_BROADCAST);
 	BeforeCondSignal(condVarAddr, tid);
+}
+
+// used to define the point of instrumentation
+#define INSTRUMENT_BEFORE 1
+#define INSTRUMENT_AFTER  2
+#define INSTRUMENT_BOTH   (INSTRUMENT_BEFORE | INSTRUMENT_AFTER)
+
+
+/*
+ * Used to add instrumentation routines before and/or after a function.
+ *
+ * THREADID & all parameters are passed to the before routines.
+ * THREADID & exit value are passed to the after routines.
+ *
+ * funptr:         function to add instrumentation
+ * position:       before, after or both
+ * parameterCount: # parameters to pass to the before instrumentation function
+ *
+ */
+static VOID
+addInstrumentation(IMG img, const char * name, char position, int parameterCount, AFUNPTR beforeFUNPTR, AFUNPTR afterFUNPTR)
+{
+	RTN rtn = RTN_FindByName(img, name);
+	if (RTN_Valid(rtn))
+	{
+		RTN_Open(rtn);
+
+		if(position & INSTRUMENT_BEFORE)
+		{
+			assert(beforeFUNPTR);
+
+			switch(parameterCount)
+			{
+			case 1:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_END);
+				break;
+			case 2:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_END);
+				break;
+			case 3:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
+				               IARG_END);
+				break;
+			case 4:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
+				               IARG_FUNCARG_ENTRYPOINT_VALUE, 3,
+				               IARG_END);
+				break;
+			default:
+				fprintf(stderr,
+				        "Instrumentation for functions with %d arguments are not implemented yet\n",
+				        parameterCount);
+				exit(1);
+			}
+		}
+
+		if(position & INSTRUMENT_AFTER)
+		{
+			assert(afterFUNPTR);
+
+			RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(afterFUNPTR),
+			               IARG_THREAD_ID,
+			               IARG_FUNCRET_EXITPOINT_VALUE,
+			               IARG_END);
+		}
+
+		RTN_Close(rtn);
+	}
 }
 
 // This routine is executed for each image.
@@ -614,89 +720,46 @@ VOID ImageLoad(IMG img, VOID *)
 		RTN_Close(rtn);
 	}
 
-	/* MUTEX LOCK / UNLOCK */
-	rtn = RTN_FindByName(img, "pthread_mutex_lock");
-	if (RTN_Valid(rtn))
+	if ((IMG_Name(img).find("libpthread.so") != string::npos)
+	        || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
+	        || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
 	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeLock),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterLock), IARG_THREAD_ID,
-		               IARG_END);
-		RTN_Close(rtn);
-	}
+		// create
+		addInstrumentation(img, "pthread_create", INSTRUMENT_BEFORE, 4,
+		                   AFUNPTR(BeforeCreate), NULL);
 
-	rtn = RTN_FindByName(img, "pthread_mutex_trylock");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeLock),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterTryLock),
-		               IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		addInstrumentation(img, "pthread_join", INSTRUMENT_AFTER, 1,
+		                   NULL, AFUNPTR(AfterJoin));
 
-	rtn = RTN_FindByName(img, "pthread_mutex_unlock");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeUnlock),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		// lock, try-lock, unlock
 
-	/* WAIT / NOTIFY */
+		addInstrumentation(img, "pthread_mutex_lock", INSTRUMENT_BOTH, 1,
+		                   AFUNPTR(BeforeLock), AFUNPTR(AfterLock));
 
-	rtn = RTN_FindByName(img, "pthread_cond_wait");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondWait),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_FUNCARG_ENTRYPOINT_VALUE,
-		               1, IARG_THREAD_ID, IARG_END);
-		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterCondWait),
-		               IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		addInstrumentation(img, "pthread_mutex_trylock", INSTRUMENT_BOTH, 1,
+		                   AFUNPTR(BeforeLock), AFUNPTR(AfterTryLock));
 
-	rtn = RTN_FindByName(img, "pthread_cond_signal");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondSignal),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		addInstrumentation(img, "pthread_mutex_unlock", INSTRUMENT_BEFORE, 1,
+		                   AFUNPTR(BeforeUnlock), NULL);
 
-	rtn = RTN_FindByName(img, "pthread_cond_broadcast");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeCondBroadcast),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		// wait, signal
 
-	rtn = RTN_FindByName(img, "pthread_barrier_wait");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeBarrierWait),
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 0, IARG_THREAD_ID, IARG_END);
-		RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(AfterBarrierWait),
-		               IARG_FUNCRET_EXITPOINT_VALUE, IARG_THREAD_ID, IARG_END);
-		RTN_Close(rtn);
-	}
+		addInstrumentation(img, "pthread_cond_wait", INSTRUMENT_BOTH, 2,
+		                   AFUNPTR(BeforeCondWait), AFUNPTR(AfterCondWait));
 
-	rtn = RTN_FindByName(img, "pthread_barrier_init");
-	if (RTN_Valid(rtn))
-	{
-		RTN_Open(rtn);
-		RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(BeforeBarrierInit),
-		               IARG_THREAD_ID, IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-		               IARG_FUNCARG_ENTRYPOINT_VALUE, 2, IARG_END);
-		RTN_Close(rtn);
+		addInstrumentation(img, "pthread_cond_signal", INSTRUMENT_BEFORE, 1,
+		                   AFUNPTR(BeforeCondSignal), NULL);
+
+		addInstrumentation(img, "pthread_cond_broadcast", INSTRUMENT_BEFORE, 1,
+		                   AFUNPTR(BeforeCondBroadcast), NULL);
+
+		// barrier
+
+		addInstrumentation(img, "pthread_barrier_init", INSTRUMENT_BEFORE, 3,
+		                   AFUNPTR(BeforeBarrierInit), NULL);
+
+		addInstrumentation(img, "pthread_barrier_wait", INSTRUMENT_BOTH, 1,
+		                   AFUNPTR(BeforeBarrierWait), AFUNPTR(AfterBarrierWait));
 	}
 }
 
