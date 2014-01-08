@@ -67,6 +67,9 @@ INT32 Usage()
 typedef deque<VectorClock> EpochList;
 typedef EpochList::iterator EpochListIterator;
 
+typedef map<pthread_t, VectorClock> ChildVCMap;
+typedef ChildVCMap::iterator ChildVCMapItr;
+
 class ThreadLocalStorage
 {
 public:
@@ -74,12 +77,16 @@ public:
 	EpochList epochList;              // Epoch history coming from normal execution
 	VectorClock currentVC;            // Current vector clock of the thread
 	VectorClock TRT;                  // Next vector clock of the thread
-	deque<VectorClock> createVCList;  // List of vc taken at thread creation times
+	//	deque<VectorClock> createVCList;  // List of vc taken at thread creation times
 	THREADID tid;
+
+	pthread_t* lastCreatedChild;
+	ChildVCMap childVCMap;
 
 	ThreadLocalStorage(THREADID tid)
 	{
 		this->tid = tid;
+		lastCreatedChild = NULL;
 		out = NULL;
 	}
 
@@ -335,9 +342,9 @@ void* thread_function(void* arg)
 
 
 
-VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
-                  __const pthread_attr_t *__restrict __attr,
-                  void *(*__start_routine)(void *), void *__restrict __arg)
+VOID BeforeCreate(THREADID tid, pthread_t *__restrict newthread,
+                  __const pthread_attr_t *__restrict attr,
+                  void *(*start_routine)(void *), void *__restrict arg)
 {
 	if (!enable_tool)
 		return;
@@ -385,8 +392,6 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 		}
 	}
 
-	tls->createVCList.push_back(tls->currentVC);
-
 #ifdef ENABLE_GRT_CHECK
 
 	GRT.updateGRT(tls->TRT);
@@ -398,10 +403,21 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 
 	advanceTRT(tls);
 	ReleaseLock(&GRTLock);
+
+	tls->lastCreatedChild = newthread;
 }
 
 VOID AfterCreate(THREADID tid, int rc)
 {
+	ThreadLocalStorage* tls = getTLS(tid);
+
+	pthread_t childPthreadId = *(tls->lastCreatedChild);
+
+	printf("Putting child with PTHREAD_ID = %ld ", childPthreadId);
+	tls->currentVC.printVector(stdout);
+
+	tls->childVCMap[childPthreadId] = tls->currentVC;
+
 	currentCreateOrder++;
 	ReleaseLock(&atomic_create);
 }
@@ -793,8 +809,22 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		// calculate vector clock
 		ThreadLocalStorage* parentTLS = getTLS(parentTID);
 		assert(parentTLS);
-		VectorClock calculatedVC(parentTLS->createVCList.front(), tid);
-		parentTLS->createVCList.pop_front();
+
+		printf("looking for OS_THREAD_ID %d in the map\n", PIN_GetTid());
+
+		pthread_t pthreadId = 0;
+		PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT,
+		                            AFUNPTR(pthread_self),
+		                            PIN_PARG(pthread_t), pthreadId,
+		                            PIN_PARG_END());
+
+		assert(pthreadId || (printf("call application fun didn't work")));
+
+		ChildVCMapItr itr = parentTLS->childVCMap.find(PIN_GetTid());
+
+		assert(itr != parentTLS->childVCMap.end());
+
+		VectorClock calculatedVC(itr->second, tid);
 
 		// compare it with TRT
 		assert(tls->currentVC == calculatedVC ||
