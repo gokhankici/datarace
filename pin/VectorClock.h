@@ -64,7 +64,7 @@ public:
 
 	// utilities
 	bool isEmpty();
-	void printVector(FILE* out);
+	int printVector(FILE* out);
 	void toString();
 };
 

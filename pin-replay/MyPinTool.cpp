@@ -75,9 +75,11 @@ public:
 	VectorClock currentVC;            // Current vector clock of the thread
 	VectorClock TRT;                  // Next vector clock of the thread
 	deque<VectorClock> createVCList;  // List of vc taken at thread creation times
+	THREADID tid;
 
-	ThreadLocalStorage()
+	ThreadLocalStorage(THREADID tid)
 	{
+		this->tid = tid;
 		out = NULL;
 	}
 
@@ -102,10 +104,15 @@ ThreadLocalStorage* getTLS(THREADID tid)
 /*
  * Advances the TRT and returns true if TRT is successfully advanced
  */
+
+PIN_LOCK epochListLock;
+
 inline static
 bool advanceTRT(ThreadLocalStorage* tls)
 {
 	assert(tls);
+
+	GetLock(&epochListLock, tls->tid);
 	if(! tls->epochList.empty())
 	{
 		tls->currentVC = tls->TRT;
@@ -114,8 +121,12 @@ bool advanceTRT(ThreadLocalStorage* tls)
 		tls->TRT = *itr;
 
 		tls->epochList.pop_front();
+
+		ReleaseLock(&epochListLock);
 		return true;
 	}
+
+	ReleaseLock(&epochListLock);
 	return false;
 }
 
@@ -128,11 +139,36 @@ ThreadIdMap threadIdMap;
 VectorClock GRT;
 PIN_LOCK GRTLock;
 
+/*
+ * Wait for the global timestamp to pass and then update it
+ */
+const UINT32 SLEEP_TIME = 10;
+
+void static
+updateGRTLoop(THREADID tid, ThreadLocalStorage* tls)
+{
+	while (true)
+	{
+		GetLock(&GRTLock, tid + 1);
+
+		if (tls->TRT.lessThanGRT(GRT))
+		{
+			break;
+		}
+		else
+		{
+			ReleaseLock(&GRTLock);
+			PIN_Sleep(SLEEP_TIME);
+		}
+	}
+
+	GRT.updateGRT(tls->TRT);
+	ReleaseLock(&GRTLock);
+}
+
 /* ### MY ADDITIONS ################################################ */
 
 typedef pair<UINT32, pair<UINT32, SIZE> > RECORD_PAIR;
-
-const UINT32 SLEEP_TIME = 10;
 
 BOOL enable_tool = false;
 
@@ -361,7 +397,6 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 #endif
 
 	advanceTRT(tls);
-
 	ReleaseLock(&GRTLock);
 }
 
@@ -376,13 +411,7 @@ VOID BeforeJoin(THREADID tid, pthread_t thread, void **retval)
 	ThreadLocalStorage* tls = getTLS(tid);
 	assert(tls);
 
-#ifdef ENABLE_GRT_CHECK
-	GetLock(&GRTLock, tid + 1);
-	assert(tls->TRT.lessThanGRT(GRT));
-	GRT.updateGRT(tls->TRT);
-	ReleaseLock(&GRTLock);
-#endif
-
+	updateGRTLoop(tid, tls);
 	advanceTRT(tls);
 }
 
@@ -707,7 +736,7 @@ VOID BeforeMain(THREADID tid, int argc, char ** argv)
 
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	ThreadLocalStorage* tls = new ThreadLocalStorage();
+	ThreadLocalStorage* tls = new ThreadLocalStorage(tid);
 
 	// create the stream to read the epochs
 	char epochFileName[30];
@@ -715,6 +744,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 	ifstream infile(epochFileName);
 
+	GetLock(&epochListLock, tid + 1);
 	// read epochs into memory
 	while (infile)
 	{
@@ -729,23 +759,13 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 
 		tls->epochList.push_back(VectorClock(ss, tid));
 	}
+	ReleaseLock(&epochListLock);
 
 	// load the first TRT
 	bool emptyEpochListCheck = advanceTRT(tls);
 	assert(emptyEpochListCheck);
 
-	// Thread should be able to start
-	GetLock(&GRTLock, tid + 1);
-
-#ifdef ENABLE_REEXECUTE_DEBUG
-
-	cout << "ThreadStart\nGRT: " << GRT << "TRT: " << tls->TRT;
-#endif
-
-	assert(tls->TRT.lessThanGRT(GRT));
-	ReleaseLock(&GRTLock);
-
-	GRT.updateGRT(tls->TRT);
+	updateGRTLoop(tid, tls);
 
 	// update the TLS for upcoming sync operations
 	tls->currentVC = tls->TRT;
@@ -777,13 +797,31 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		parentTLS->createVCList.pop_front();
 
 		// compare it with TRT
-		assert(tls->currentVC == calculatedVC);
+		assert(tls->currentVC == calculatedVC ||
+		       (printf("current:\n") && tls->currentVC.printVector(stdout) &&
+		        printf("calculated:\n") && calculatedVC.printVector(stdout) && false));
 
 		ReleaseLock(&threadStartLock);
 	}
 #endif
 
 	PIN_SetThreadData(tlsKey, tls, tid);
+}
+
+VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+
+	// create the last TRT
+	tls->TRT.advance();
+
+	GetLock(&epochListLock, tid+1);
+	assert(tls->epochList.empty());
+	ReleaseLock(&epochListLock);
+
+	GetLock(&GRTLock, tid+1);
+	GRT.updateGRT(tls->TRT);
+	ReleaseLock(&GRTLock);
 }
 
 /* ===================================================================== */
@@ -872,7 +910,8 @@ void ImgLoad(IMG img, void *v)
 	        || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
 	        || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
 	{
-		addInstrumentation(img, "pthread_create", INSTRUMENT_BOTH, 4, AFUNPTR(BeforeCreate), AFUNPTR(AfterCreate));
+		addInstrumentation(img, "pthread_create", INSTRUMENT_BOTH,   4, AFUNPTR(BeforeCreate), AFUNPTR(AfterCreate));
+		addInstrumentation(img, "pthread_join",   INSTRUMENT_BEFORE, 2, AFUNPTR(BeforeJoin),   NULL);
 	}
 
 	if(IMG_IsMainExecutable(img))
@@ -898,6 +937,7 @@ int main(int argc, char *argv[])
 	InitLock(&index_lock);
 	InitLock(&threadStartLock);
 	InitLock(&GRTLock);
+	InitLock(&epochListLock);
 
 	InitLock(&vector_lock);
 	InitLock(&mutex_map_lock);
@@ -909,6 +949,7 @@ int main(int argc, char *argv[])
 	// Register the instrumentation callback
 	IMG_AddInstrumentFunction(ImgLoad, 0);
 	PIN_AddThreadStartFunction(ThreadStart, 0);
+	PIN_AddThreadFiniFunction(ThreadFini, 0);
 
 	// Start the application
 	PIN_StartProgram();

@@ -299,11 +299,11 @@ bool VectorClock::operator==(const VectorClock& vRight)
 	return true;
 }
 
-void VectorClock::printVector(FILE* out)
+int VectorClock::printVector(FILE* out)
 {
 	for (int i = 0; i < totalProcessCount - 1; ++i)
 	{
 		fprintf(out, "%d,", vc[i]);
 	}
-	fprintf(out, "%d\n", vc[totalProcessCount - 1]);
+	return fprintf(out, "%d\n", vc[totalProcessCount - 1]);
 }
