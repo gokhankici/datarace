@@ -6,6 +6,13 @@
 #include "GlobalVariables.h"
 #include "RecordNReplay.h"
 
+// define the replaced function here for convenience
+enum
+{
+    __PTHREAD_CREATE__
+};
+
+
 /*static void writeInHex(const unsigned char* data, int len)
  {
  for (int i = 0; i < len; i++)
@@ -17,9 +24,13 @@
 /*
  * Get the local storage of the thread with the given id
  */
-static ThreadLocalStorage* getTLS(THREADID tid)
+inline static
+ThreadLocalStorage* getTLS(THREADID tid)
 {
-	return static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	assert(tls || (printf("Failed for thread %d\n", tid) && false));
+
+	return tls;
 }
 
 /*
@@ -28,6 +39,8 @@ static ThreadLocalStorage* getTLS(THREADID tid)
 static void printSignatures(THREADID tid)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
+	assert(tls && tls->out && tls->vectorClock);
+
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 
@@ -83,11 +96,25 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		threadCreateOrder.push_back(thisThreadInfo);
 
 		ThreadLocalStorage* parentTls = getTLS(parentTID);
-		assert(parentTls);
 
 		// calculate vector clock
-		tls->vectorClock = new VectorClock(parentTls->createVCList.front(), tid);
-		parentTls->createVCList.pop_front();
+		ChildVCMapItr itr = parentTls->createVCMap.find(tid);
+		// TODO: fix here
+		int count = 0;
+		do
+		{
+			ReleaseLock(&threadIdMapLock);
+			PIN_Sleep(50);
+			count++;
+			GetLock(&threadIdMapLock, tid + 1);
+		}
+		while(itr == parentTls->createVCMap.end() && count < 100);
+
+		assert(count != 100 ||
+		       (printf("TID: %d ### Parent TID: %d\n", tid, parentTID) && 0));
+
+		tls->vectorClock = new VectorClock(itr->second, tid);
+		parentTls->createVCMap.erase(itr);
 	}
 	else
 	{
@@ -119,8 +146,6 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 
 	ReleaseLock(&rdmLock);
 
-	vectorClock->advance();
-
 	/* update parent thread's vector clock with the finished child's */
 	GetLock(&threadIdMapLock, tid + 1);
 
@@ -135,7 +160,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 
 		// get its vector clock
 		ThreadLocalStorage* parentTLS = getTLS(parentTID);
-		parentTLS->joinVCList.push_back(*vectorClock);
+		parentTLS->joinVCMap[tid] = *tls->vectorClock;
 	}
 
 	ReleaseLock(&threadIdMapLock);
@@ -144,16 +169,22 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	delete tls;
 
 	PIN_SetThreadData(tlsKey, 0, tid);
+	printf("thread %d tls'ini sildi\n", tid); // HERE
 }
 
-VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
-                  __const pthread_attr_t *__restrict __attr,
-                  void *(*__start_routine)(void *), void *__restrict __arg)
+VOID PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
+                              pthread_t *__restrict newthread,
+                              __const pthread_attr_t *__restrict attr,
+                              void *(*start_routine)(void *),
+                              void *__restrict arg)
 {
+	GetLock(&atomicCreate, tid + 1);
+
 	ThreadLocalStorage* tls = getTLS(tid);
 
 	GetLock(&threadIdMapLock, tid + 1);
-	tls->createVCList.push_back(*(tls->vectorClock));
+	tls->createVCMap[globalCreatedThreadId] = *tls->vectorClock;
+	printf("Thread %d is putting %d's vc into create map\n", tid, globalCreatedThreadId); // HERE
 	ReleaseLock(&threadIdMapLock);
 
 	GetLock(&rdmLock, tid + 1);
@@ -166,17 +197,38 @@ VOID BeforeCreate(THREADID tid, pthread_t *__restrict __newthread,
 #endif
 
 	// add current signature to the rdm
-	rdm.addSignature(
-	    new SigRaceData(tid, *tls->vectorClock, *tls->readBloomFilter, *tls->writeBloomFilter));
+	rdm.addSignature( new SigRaceData(tid, *tls->vectorClock,
+	                                  *tls->readBloomFilter, *tls->writeBloomFilter));
+	ReleaseLock(&rdmLock);
 
-	tls->vectorClock->advance();
 	tls->readBloomFilter->clear();
 	tls->writeBloomFilter->clear();
+	tls->vectorClock->advance();
 
-	ReleaseLock(&rdmLock);
+	//	MyStartRoutineArgs* myArgs = new MyStartRoutineArgs(arg, newthread);
+
+	int rc = 0;
+	PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT, origFunc,
+	                            PIN_PARG(int), &rc,
+	                            PIN_PARG(pthread_t*), newthread,
+	                            PIN_PARG(__const pthread_attr_t *), attr,
+	                            PIN_PARG(void *(*)(void *)), start_routine,
+	                            PIN_PARG(void*), arg,
+	                            PIN_PARG_END());
+
+	GetLock(&threadIdMapLock, tid + 1);
+	pthreadPinIdMap[*newthread] = globalCreatedThreadId;
+	globalCreatedThreadId++;
+	ReleaseLock(&threadIdMapLock);
+
+	ReleaseLock(&atomicCreate);
 }
 
-#define SLEEP_TIME 10
+VOID BeforeJoin(THREADID tid, pthread_t thread, void **retval)
+{
+	ThreadLocalStorage* tls = getTLS(tid);
+	tls->lastPthreadId = thread;
+}
 
 VOID AfterJoin(THREADID tid, int returnValue)
 {
@@ -192,32 +244,26 @@ VOID AfterJoin(THREADID tid, int returnValue)
 #endif
 
 	// add current signature to the rdm
-	rdm.addSignature(
-	    new SigRaceData(tid, *tls->vectorClock, *tls->readBloomFilter, *tls->writeBloomFilter));
+	rdm.addSignature(new SigRaceData(tid, *tls->vectorClock,
+	                                 *tls->readBloomFilter, *tls->writeBloomFilter));
 
 	tls->vectorClock->advance();
 	tls->readBloomFilter->clear();
 	tls->writeBloomFilter->clear();
 	ReleaseLock(&rdmLock);
 
-	// first get the joined thread's vector clock
-	while(true)
-	{
-		GetLock(&threadIdMapLock, tid+1);
-		if(! tls->joinVCList.empty())
-		{
-			break;
-		}
-		else
-		{
-			ReleaseLock(&threadIdMapLock);
-			PIN_Sleep(SLEEP_TIME);
-		}
-	}
+	GetLock(&threadIdMapLock, tid + 1);
+	PthreadPinIdMapItr itr = pthreadPinIdMap.find(tls->lastPthreadId);
+	assert(itr != pthreadPinIdMap.end());
+	THREADID joinTID = itr->second;
 
-	tls->vectorClock->receiveAction(tls->joinVCList.front());
-	tls->joinVCList.pop_front();
+	printf("JOIN %d <--- %d\n", tid, joinTID); // HERE
+
+	ChildVCMapItr childItr = tls->joinVCMap.find(joinTID);
+	assert(childItr != tls->joinVCMap.end());
 	ReleaseLock(&threadIdMapLock);
+
+	tls->vectorClock->receiveAction(childItr->second);
 }
 
 VOID BeforeLock(THREADID tid, ADDRINT lockAddr)
@@ -616,12 +662,6 @@ VOID BeforeCondBroadcast(THREADID tid, ADDRINT condVarAddr)
 	BeforeCondSignal(condVarAddr, tid);
 }
 
-// used to define the point of instrumentation
-#define INSTRUMENT_BEFORE 1
-#define INSTRUMENT_AFTER  2
-#define INSTRUMENT_BOTH   (INSTRUMENT_BEFORE | INSTRUMENT_AFTER)
-
-
 /*
  * Used to add instrumentation routines before and/or after a function.
  *
@@ -645,37 +685,34 @@ addInstrumentation(IMG img, const char * name, char position, int parameterCount
 		{
 			assert(beforeFUNPTR);
 
+			assert(parameterCount >=0 && parameterCount <=4);
+
 			switch(parameterCount)
 			{
+			case 0:
+				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
+				               IARG_THREAD_ID,
+				               ARGUMENT_LIST_0);
+				break;
 			case 1:
 				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
 				               IARG_THREAD_ID,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				               IARG_END);
+				               ARGUMENT_LIST_1);
 				break;
 			case 2:
 				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
 				               IARG_THREAD_ID,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-				               IARG_END);
+				               ARGUMENT_LIST_2);
 				break;
 			case 3:
 				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
 				               IARG_THREAD_ID,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
-				               IARG_END);
+				               ARGUMENT_LIST_3);
 				break;
 			case 4:
 				RTN_InsertCall(rtn, IPOINT_BEFORE, AFUNPTR(beforeFUNPTR),
 				               IARG_THREAD_ID,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 0,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 1,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 2,
-				               IARG_FUNCARG_ENTRYPOINT_VALUE, 3,
-				               IARG_END);
+				               ARGUMENT_LIST_4);
 				break;
 			default:
 				fprintf(stderr,
@@ -697,6 +734,24 @@ addInstrumentation(IMG img, const char * name, char position, int parameterCount
 
 		RTN_Close(rtn);
 	}
+}
+
+AFUNPTR
+replaceSignature(IMG img, const char* originalFunctionName,
+                 AFUNPTR replacementFunction, int functionNo)
+{
+	RTN rtn = RTN_FindByName(img, originalFunctionName);
+	if (RTN_Valid(rtn))
+	{
+		switch(functionNo)
+		{
+		case __PTHREAD_CREATE__:
+			return RTN_ReplaceSignature(rtn, replacementFunction, PTHREAD_CREATE_ARGS);
+		default:
+			return NULL;
+		}
+	}
+	return NULL;
 }
 
 // This routine is executed for each image.
@@ -724,12 +779,12 @@ VOID ImageLoad(IMG img, VOID *)
 	        || (IMG_Name(img).find("LIBPTHREAD.SO") != string::npos)
 	        || (IMG_Name(img).find("LIBPTHREAD.so") != string::npos))
 	{
-		// create
-		addInstrumentation(img, "pthread_create", INSTRUMENT_BEFORE, 4,
-		                   AFUNPTR(BeforeCreate), NULL);
+		replaceSignature(img, "pthread_create",
+		                 AFUNPTR(PthreadCreateReplacement),
+		                 __PTHREAD_CREATE__);
 
-		addInstrumentation(img, "pthread_join", INSTRUMENT_AFTER, 1,
-		                   NULL, AFUNPTR(AfterJoin));
+		addInstrumentation(img, "pthread_join", INSTRUMENT_BOTH, 2,
+		                   AFUNPTR(BeforeJoin), AFUNPTR(AfterJoin));
 
 		// lock, try-lock, unlock
 

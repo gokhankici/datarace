@@ -66,26 +66,27 @@ KNOB<string> KnobReference(KNOB_MODE_WRITEONCE, "pintool", "reference",
 
 // <<< Thread local storage <<<<<<<<<<<<<<<<<<<<<<
 TLS_KEY tlsKey;
+
+PthreadPinIdMap pthreadPinIdMap;
 // >>> Thread local storage >>>>>>>>>>>>>>>>>>>>>>
 
 // <<< Global storage <<<<<<<<<<<<<<<<<<<<<<<<<<<<
 PIN_LOCK rdmLock;
+PIN_LOCK atomicCreate;
+PIN_LOCK barrierLock;
+PIN_LOCK threadIdMapLock;
+PIN_LOCK fileLock;
+PIN_LOCK memorySetLock;
+
+THREADID globalCreatedThreadId = 1;
+ThreadIdMap threadIdMap;
 
 //WaitQueueMap* waitQueueMap;
 UnlockThreadMap* unlockedThreadMap;
 NotifyThreadMap* notifiedThreadMap;
-
-PIN_LOCK barrierLock;
 BarrierMap barrierWaitMap;
 
-PIN_LOCK threadIdMapLock;
-ThreadIdMap threadIdMap;
-
-PIN_LOCK fileLock;
-
 RaceDetectionModule rdm;
-
-PIN_LOCK memorySetLock;
 MemorySet memorySet;
 
 // record-n-replay
@@ -126,6 +127,7 @@ int main(INT32 argc, CHAR **argv)
 	InitLock(&barrierLock);
 	InitLock(&memorySetLock);
 	InitLock(&recordLock);
+	InitLock(&atomicCreate);
 
 	recordFile = fopen("record.txt", "w");
 	raceInfoFile = fopen("race_info.txt", "w");

@@ -15,8 +15,12 @@ extern UnlockThreadMap* unlockedThreadMap;
 extern NotifyThreadMap* notifiedThreadMap;
 extern RaceDetectionModule rdm;
 
+extern PIN_LOCK atomicCreate;
+
 extern PIN_LOCK threadIdMapLock;
 extern ThreadIdMap threadIdMap;
+
+extern PthreadPinIdMap pthreadPinIdMap;
 
 extern PIN_LOCK barrierLock;
 extern BarrierMap barrierWaitMap;
@@ -36,6 +40,46 @@ extern KNOB<string> KnobReference;
 extern THREADID lastParent;
 extern int createdThreadCount;
 extern FILE* createFile;
+
+// used to define the point of instrumentation
+#define INSTRUMENT_BEFORE 1
+#define INSTRUMENT_AFTER  2
+#define INSTRUMENT_BOTH   (INSTRUMENT_BEFORE | INSTRUMENT_AFTER)
+
+#define ARGUMENT_LIST_0   IARG_END
+#define ARGUMENT_LIST_1   IARG_FUNCARG_ENTRYPOINT_VALUE, 0,\
+                          ARGUMENT_LIST_0
+#define ARGUMENT_LIST_2   IARG_FUNCARG_ENTRYPOINT_VALUE, 0,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 1,\
+                          ARGUMENT_LIST_0
+#define ARGUMENT_LIST_3   IARG_FUNCARG_ENTRYPOINT_VALUE, 0,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 1,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 2,\
+                          ARGUMENT_LIST_0
+#define ARGUMENT_LIST_4   IARG_FUNCARG_ENTRYPOINT_VALUE, 0,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 1,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 2,\
+                          IARG_FUNCARG_ENTRYPOINT_VALUE, 3,\
+                          ARGUMENT_LIST_0
+
+#define PTHREAD_CREATE_ARGS IARG_THREAD_ID,\
+                            IARG_CONST_CONTEXT,\
+	                        IARG_ORIG_FUNCPTR,\
+                            ARGUMENT_LIST_4
+
+
+class MyStartRoutineArgs
+{
+public:
+	void* origArgs;
+	pthread_t* childId;
+
+	MyStartRoutineArgs(void* origArgs, pthread_t* childId) :
+			origArgs(origArgs), childId(childId)
+	{}
+}
+;
+
 
 VOID ImageLoad(IMG img, VOID *);
 

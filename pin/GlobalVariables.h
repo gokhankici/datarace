@@ -14,14 +14,21 @@
 
 extern TLS_KEY tlsKey;
 
+typedef map<pthread_t, THREADID> PthreadPinIdMap;
+typedef PthreadPinIdMap::iterator PthreadPinIdMapItr;
+
+typedef map<THREADID, VectorClock> ChildVCMap;
+typedef ChildVCMap::iterator ChildVCMapItr;
+
 class ThreadLocalStorage
 {
 public:
 	FILE* out;
 	VectorClock* vectorClock;
 
-	deque<VectorClock> createVCList;
-	deque<VectorClock> joinVCList;
+	ChildVCMap createVCMap;
+	ChildVCMap joinVCMap;
+	pthread_t lastPthreadId;
 
 	Bloom* readBloomFilter;
 	Bloom* writeBloomFilter;
@@ -46,6 +53,8 @@ public:
 		nextMallocSize = 0;
 		nextReallocAddr = 0;
 		nextReallocSize = 0;
+
+		lastPthreadId = 0;
 	}
 
 	~ThreadLocalStorage()
