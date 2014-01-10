@@ -16,7 +16,7 @@
 #include "MultiCacheSim-dist/MultiCacheSim.h"
 #define MAX_NTHREADS 64
 
-extern THREADID globalCreatedThreadId;
+extern THREADID lastCreatedThread;
 
 extern std::vector<MultiCacheSim *> Caches;
 extern MultiCacheSim *ReferenceProtocol;

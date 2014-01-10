@@ -29,4 +29,6 @@
 
 //#define PRINT_SYNC_FUNCTION
 
+#define PRINT_SIGNATURES
+
 #endif /* MYDEFINITIONS_H_ */

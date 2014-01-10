@@ -4,6 +4,7 @@
 #include <assert.h>
 
 #include <iostream>
+#include <iomanip>
 #include <algorithm>
 
 #include "Bloom.h"
@@ -231,7 +232,7 @@ ostream& operator<<(ostream& os, const Bloom& v)
 #ifdef SET_OVERRIDE
 	for(set<ADDRINT>::iterator itr = v.locations.begin(); itr != v.locations.end(); itr++)
 	{
-		os << *itr << ", ";
+		os << hex << *itr << ", ";
 	}
 	os << endl;
 #endif

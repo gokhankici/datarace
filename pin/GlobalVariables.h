@@ -12,6 +12,8 @@
 // set 1 GB limit to mutex pointer
 #define MUTEX_POINTER_LIMIT 0x40000000
 
+#define NOT_A_THREADID 0xFFFFFFFF
+
 extern TLS_KEY tlsKey;
 
 typedef map<pthread_t, THREADID> PthreadPinIdMap;
@@ -20,15 +22,19 @@ typedef PthreadPinIdMap::iterator PthreadPinIdMapItr;
 typedef map<THREADID, VectorClock> ChildVCMap;
 typedef ChildVCMap::iterator ChildVCMapItr;
 
+#define EASSERT(expr) assert((expr))
+#define EASSERT_LOG(expr, err_msg) \
+	assert((expr) || (printf(err_msg) && 0))
+#define EASSERT_MSG(expr, err_msg, ...) \
+	assert((expr) || (printf(err_msg, __VA_ARGS__) && 0))
+
 class ThreadLocalStorage
 {
 public:
 	FILE* out;
 	VectorClock* vectorClock;
 
-	ChildVCMap createVCMap;
 	ChildVCMap joinVCMap;
-	pthread_t lastPthreadId;
 
 	Bloom* readBloomFilter;
 	Bloom* writeBloomFilter;
@@ -53,8 +59,6 @@ public:
 		nextMallocSize = 0;
 		nextReallocAddr = 0;
 		nextReallocSize = 0;
-
-		lastPthreadId = 0;
 	}
 
 	~ThreadLocalStorage()

@@ -36,7 +36,8 @@ VOID TurnInstrumentationOff(ADDRINT tid)
 BOOL isMemoryGlobal(ADDRINT effectiveAddr, ADDRINT stackPtr)
 {
 	//if stack pointer is greater, it is global or in heap --> shared
-	if (static_cast<UINT64>(abs(stackPtr - effectiveAddr)) > STACK_PTR_ERROR)
+	if (static_cast<UINT64>(abs(stackPtr - effectiveAddr)) >
+	        STACK_PTR_ERROR)
 	{
 		return true;
 	}
@@ -49,20 +50,23 @@ VOID addToReadFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 	if (isMemoryGlobal(addr, stackPtr))
 	{
 		ThreadLocalStorage* tls =
-				static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+		    static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 		Bloom* readSig = tls->readBloomFilter;
 
 #ifdef WRITE_ADDRESSES_TO_LOG_FILE
+
 		fprintf(tls->out, "R : %lX\n", addr);
 #endif
 
-		readSig->add(BLOOM_ADDR(addr) );
+		GetLock(&rdmLock, tid + 1);
+		readSig->add(BLOOM_ADDR(addr));
+		ReleaseLock(&rdmLock);
 	}
 }
 
 //void Read(THREADID tid, ADDRINT addr, ADDRINT inst)
 void Read(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
-		ADDRINT inst, UINT32 readSize)
+          ADDRINT inst, UINT32 readSize)
 {
 	addToReadFilter(tid, addr, stackPtr);
 
@@ -105,20 +109,23 @@ VOID addToWriteFilter(THREADID tid, ADDRINT addr, ADDRINT stackPtr)
 	if (isMemoryGlobal(addr, stackPtr))
 	{
 		ThreadLocalStorage* tls =
-				static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+		    static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 		Bloom* writeSig = tls->writeBloomFilter;
 
 #ifdef WRITE_ADDRESSES_TO_LOG_FILE
+
 		fprintf(tls->out, "W : %lX\n", addr);
 #endif
 
-		writeSig->add(BLOOM_ADDR(addr) );
+		GetLock(&rdmLock, tid + 1);
+		writeSig->add(BLOOM_ADDR(addr));
+		ReleaseLock(&rdmLock);
 	}
 }
 
 //void Write(THREADID tid, ADDRINT addr, ADDRINT inst)
 void Write(THREADID tid, ADDRINT addr, ADDRINT stackPtr, const char* imageName,
-		ADDRINT inst, UINT32 writeSize)
+           ADDRINT inst, UINT32 writeSize)
 {
 	addToWriteFilter(tid, addr, stackPtr);
 
@@ -164,10 +171,10 @@ void processMemoryWriteInstruction(INS ins, const char* imageName)
 		if (INS_MemoryOperandIsWritten(ins, i) && INS_OperandIsMemory(ins, i))
 		{
 			INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR) Write,
-					IARG_THREAD_ID, IARG_MEMORYOP_EA, i, IARG_REG_VALUE,
-					REG_STACK_PTR, //pass current stack ptr
-					IARG_PTR, imageName, IARG_INST_PTR, IARG_MEMORYWRITE_SIZE,
-					IARG_CALL_ORDER, CALL_ORDER_FIRST + 30, IARG_END);
+			                         IARG_THREAD_ID, IARG_MEMORYOP_EA, i, IARG_REG_VALUE,
+			                         REG_STACK_PTR, //pass current stack ptr
+			                         IARG_PTR, imageName, IARG_INST_PTR, IARG_MEMORYWRITE_SIZE,
+			                         IARG_CALL_ORDER, CALL_ORDER_FIRST + 30, IARG_END);
 		}
 	}
 }
@@ -180,10 +187,10 @@ void processMemoryReadInstruction(INS ins, const char* imageName)
 		if (INS_MemoryOperandIsRead(ins, i))
 		{
 			INS_InsertPredicatedCall(ins, IPOINT_BEFORE, (AFUNPTR) Read,
-					IARG_THREAD_ID, IARG_MEMORYOP_EA, i, IARG_REG_VALUE,
-					REG_STACK_PTR, //pass current stack ptr
-					IARG_PTR, imageName, IARG_INST_PTR, IARG_MEMORYWRITE_SIZE,
-					IARG_CALL_ORDER, CALL_ORDER_FIRST + 30, IARG_END);
+			                         IARG_THREAD_ID, IARG_MEMORYOP_EA, i, IARG_REG_VALUE,
+			                         REG_STACK_PTR, //pass current stack ptr
+			                         IARG_PTR, imageName, IARG_INST_PTR, IARG_MEMORYWRITE_SIZE,
+			                         IARG_CALL_ORDER, CALL_ORDER_FIRST + 30, IARG_END);
 		}
 	}
 }
@@ -208,13 +215,13 @@ VOID instrumentTrace(TRACE trace, VOID *v)
 }
 
 BOOL segvHandler(THREADID threadid, INT32 sig, CONTEXT *ctx, BOOL hasHndlr,
-		const EXCEPTION_INFO *pExceptInfo, VOID*v)
+                 const EXCEPTION_INFO *pExceptInfo, VOID*v)
 {
 	return TRUE; //let the program's handler run too
 }
 
 BOOL termHandler(THREADID threadid, INT32 sig, CONTEXT *ctx, BOOL hasHndlr,
-		const EXCEPTION_INFO *pExceptInfo, VOID*v)
+                 const EXCEPTION_INFO *pExceptInfo, VOID*v)
 {
 	return TRUE; //let the program's handler run too
 }
@@ -228,7 +235,7 @@ BOOL termHandler(THREADID threadid, INT32 sig, CONTEXT *ctx, BOOL hasHndlr,
 static ThreadLocalStorage* getTLS(THREADID tid)
 {
 	ThreadLocalStorage* tls =
-			static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
+	    static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
 	return tls;
 }
 
@@ -259,7 +266,7 @@ static const MemoryArea& findMemoryArea(ADDRINT from)
 //}
 
 static VOID moveMemoryAddresses(ADDRINT startOfOldPlace,
-		ADDRINT startOfNewPlace, UINT32 size, THREADID tid)
+                                ADDRINT startOfNewPlace, UINT32 size, THREADID tid)
 {
 	/*
 	 ADDRINT maxSize = (startOfOldPlace + size);
@@ -325,7 +332,7 @@ static VOID moveMemoryAddresses(ADDRINT startOfOldPlace,
 }
 
 static VOID freeMemoryAddress(ADDRINT memoryAddrFreeStarts,
-		ADDRINT maxMemoryAddrToBeFreed, THREADID threadid)
+                              ADDRINT maxMemoryAddrToBeFreed, THREADID threadid)
 {
 	/*
 	 variablesHashMap* tmpHashMap;
@@ -355,7 +362,7 @@ static VOID freeMemoryAddress(ADDRINT memoryAddrFreeStarts,
 }
 
 VOID ReallocEnter(CHAR * name, ADDRINT previousAddress, ADDRINT newSize,
-		THREADID tid)
+                  THREADID tid)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	tls->nextReallocAddr = previousAddress;
@@ -390,7 +397,7 @@ VOID ReallocAfter(ADDRINT mallocStartAddr, THREADID tid)
 		if (newSize < prevSize)
 		{
 			freeMemoryAddress(mallocStartAddr + newSize,
-					mallocStartAddr + prevSize, tid);
+			                  mallocStartAddr + prevSize, tid);
 		}
 	}
 	else
@@ -399,12 +406,12 @@ VOID ReallocAfter(ADDRINT mallocStartAddr, THREADID tid)
 		{
 			moveMemoryAddresses(previousAddress, mallocStartAddr, newSize, tid);
 			freeMemoryAddress(previousAddress + newSize,
-					previousAddress + prevSize, tid);
+			                  previousAddress + prevSize, tid);
 		}
 		else
 		{
 			moveMemoryAddresses(previousAddress, mallocStartAddr, prevSize,
-					tid);
+			                    tid);
 			freeMemoryAddress(previousAddress, previousAddress + prevSize, tid);
 		}
 	}
@@ -416,7 +423,7 @@ VOID ReallocAfter(ADDRINT mallocStartAddr, THREADID tid)
 }
 
 VOID CallocEnter(CHAR * name, ADDRINT nElements, ADDRINT sizeOfEachElement,
-		THREADID tid)
+                 THREADID tid)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
 	tls->nextMallocSize = nElements * sizeOfEachElement;

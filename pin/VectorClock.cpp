@@ -131,6 +131,17 @@ void VectorClock::receiveAction(VectorClock& vectorClockReceived)
 
 }
 
+void VectorClock::receiveWithIncrement(VectorClock& vectorClockReceived)
+{
+	UINT32 *receivedClockValues = vectorClockReceived.vc;
+	for (int i = 0; i < totalProcessCount; ++i)
+		vc[i] = (vc[i] > receivedClockValues[i]) ?
+		        vc[i] : receivedClockValues[i];
+
+	vc[threadId]++;
+	vc[vectorClockReceived.threadId]++;
+}
+
 void VectorClock::receiveActionFromSpecialPoint(
     VectorClock& vectorClockReceived, UINT32 specialPoint)
 {

@@ -8,6 +8,9 @@
 #include "Bloom.h"
 #include "MyFlags.h"
 
+#define SLEEP_DURATION   50
+#define MAX_WAKEUP_COUNT 100
+
 extern PIN_LOCK rdmLock;
 
 //extern WaitQueueMap* waitQueueMap;
@@ -66,6 +69,11 @@ extern FILE* createFile;
                             IARG_CONST_CONTEXT,\
 	                        IARG_ORIG_FUNCPTR,\
                             ARGUMENT_LIST_4
+
+#define PTHREAD_JOIN_ARGS   IARG_THREAD_ID,\
+                            IARG_CONST_CONTEXT,\
+	                        IARG_ORIG_FUNCPTR,\
+                            ARGUMENT_LIST_2
 
 
 class MyStartRoutineArgs

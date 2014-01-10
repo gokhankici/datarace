@@ -35,6 +35,7 @@ public:
 	// actions
 	void advance();
 	void receiveAction(VectorClock& vectorClockReceived);
+	void receiveWithIncrement(VectorClock& vectorClockReceived);
 	void receiveActionFromSpecialPoint(VectorClock& vectorClockReceived,
 			UINT32 specialPoint);
 	void sendEvent();

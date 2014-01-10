@@ -78,7 +78,7 @@ PIN_LOCK threadIdMapLock;
 PIN_LOCK fileLock;
 PIN_LOCK memorySetLock;
 
-THREADID globalCreatedThreadId = 1;
+THREADID lastCreatedThread = NOT_A_THREADID;
 ThreadIdMap threadIdMap;
 
 //WaitQueueMap* waitQueueMap;

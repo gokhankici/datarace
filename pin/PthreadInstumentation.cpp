@@ -9,17 +9,10 @@
 // define the replaced function here for convenience
 enum
 {
-    __PTHREAD_CREATE__
+    __PTHREAD_CREATE__,
+    __PTHREAD_JOIN__
 };
 
-
-/*static void writeInHex(const unsigned char* data, int len)
- {
- for (int i = 0; i < len; i++)
- {
- printf("%02X", data[i]);
- }
- }*/
 
 /*
  * Get the local storage of the thread with the given id
@@ -28,8 +21,7 @@ inline static
 ThreadLocalStorage* getTLS(THREADID tid)
 {
 	ThreadLocalStorage* tls = static_cast<ThreadLocalStorage*>(PIN_GetThreadData(tlsKey, tid));
-	assert(tls || (printf("Failed for thread %d\n", tid) && false));
-
+	EASSERT_MSG(tls, "Failed to get local storage of thread %d\n", tid);
 	return tls;
 }
 
@@ -39,8 +31,7 @@ ThreadLocalStorage* getTLS(THREADID tid)
 static void printSignatures(THREADID tid)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
-	assert(tls && tls->out && tls->vectorClock);
-
+	EASSERT(tls->out && tls->vectorClock);
 	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 
@@ -50,6 +41,7 @@ static void printSignatures(THREADID tid)
 	fflush(stdout);
 #endif
 
+	// write the vector clock to the logging file of the thread
 	vectorClock->printVector(out);
 	fflush(out);
 }
@@ -64,18 +56,22 @@ static void printSignatures()
  */
 VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
-	assert(tid < MAX_THREAD_COUNT);
+	EASSERT_MSG(tid < MAX_THREAD_COUNT,
+	            "Max thread id (%d) is exceeded with %d\n", MAX_THREAD_COUNT, tid);
 
 	GetLock(&threadIdMapLock, tid + 1);
 
+	// log the child-parent information
 	PrintRecordInfo(tid, CREATE);
 
 	rdm.addProcessor();
 
+	// create the thread local storage
 	ThreadLocalStorage* tls = new ThreadLocalStorage();
 	tls->readBloomFilter = new Bloom();
 	tls->writeBloomFilter = new Bloom();
 
+	// open the log file
 	string filename = KnobOutputFile.Value() + "." + decstr(tid);
 	FILE* out = fopen(filename.c_str(), "w");
 	tls->out = out;
@@ -95,43 +91,35 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 		CreateInfo thisThreadInfo(tid, parentTID);
 		threadCreateOrder.push_back(thisThreadInfo);
 
-		ThreadLocalStorage* parentTls = getTLS(parentTID);
+		ThreadLocalStorage* parentTLS = getTLS(parentTID);
 
-		// calculate vector clock
-		ChildVCMapItr itr = parentTls->createVCMap.find(tid);
-		// TODO: fix here
-		int count = 0;
-		do
-		{
-			ReleaseLock(&threadIdMapLock);
-			PIN_Sleep(50);
-			count++;
-			GetLock(&threadIdMapLock, tid + 1);
-		}
-		while(itr == parentTls->createVCMap.end() && count < 100);
+		/*
+		 * Since parent thread will advance its vector clock after
+		 * writing the tid to the lastCreatedThread variable, it is
+		 * safe to access the parent's vector clock here
+		 */
+		tls->vectorClock = new VectorClock(*parentTLS->vectorClock, tid);
 
-		assert(count != 100 ||
-		       (printf("TID: %d ### Parent TID: %d\n", tid, parentTID) && 0));
-
-		tls->vectorClock = new VectorClock(itr->second, tid);
-		parentTls->createVCMap.erase(itr);
+		lastCreatedThread = tid;
 	}
 	else
 	{
 		tls->vectorClock = new VectorClock(tid);
 	}
 
-	ReleaseLock(&threadIdMapLock);
-
 	// create the log file
 	PIN_SetThreadData(tlsKey, tls, tid);
+
+	ReleaseLock(&threadIdMapLock);
 }
 
 // This routine is executed every time a thread is destroyed.
 VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
 	if (recordFile)
+	{
 		fflush(recordFile);
+	}
 
 	ThreadLocalStorage* tls = getTLS(tid);
 	FILE* out = tls->out;
@@ -139,14 +127,13 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
 
+	// write the last information
 	GetLock(&rdmLock, tid + 1);
-
 	printSignatures();
 	rdm.addSignature(new SigRaceData(tid, *vectorClock, *readFilter, *writeFilter));
-
 	ReleaseLock(&rdmLock);
 
-	/* update parent thread's vector clock with the finished child's */
+	// update parent thread's vector clock with the finished child's
 	GetLock(&threadIdMapLock, tid + 1);
 
 	// zero means the top of the process tree
@@ -165,49 +152,27 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 
 	ReleaseLock(&threadIdMapLock);
 
+	// deallocate the memory used by the thread
 	fclose(out);
 	delete tls;
-
 	PIN_SetThreadData(tlsKey, 0, tid);
-	printf("thread %d tls'ini sildi\n", tid); // HERE
 }
 
+/*
+ * Replace the pthread_create function to handle the parent-child relationships
+ */
 VOID PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
                               pthread_t *__restrict newthread,
                               __const pthread_attr_t *__restrict attr,
                               void *(*start_routine)(void *),
                               void *__restrict arg)
 {
+	// make the thread creation atomically
 	GetLock(&atomicCreate, tid + 1);
 
 	ThreadLocalStorage* tls = getTLS(tid);
 
-	GetLock(&threadIdMapLock, tid + 1);
-	tls->createVCMap[globalCreatedThreadId] = *tls->vectorClock;
-	printf("Thread %d is putting %d's vc into create map\n", tid, globalCreatedThreadId); // HERE
-	ReleaseLock(&threadIdMapLock);
-
-	GetLock(&rdmLock, tid + 1);
-
-	printSignatures();
-
-#ifdef PRINT_SYNC_FUNCTION
-
-	fprintf(tls->out, "--- PTHREAD CREATE ---\n");
-#endif
-
-	// add current signature to the rdm
-	rdm.addSignature( new SigRaceData(tid, *tls->vectorClock,
-	                                  *tls->readBloomFilter, *tls->writeBloomFilter));
-	ReleaseLock(&rdmLock);
-
-	tls->readBloomFilter->clear();
-	tls->writeBloomFilter->clear();
-	tls->vectorClock->advance();
-
-	//	MyStartRoutineArgs* myArgs = new MyStartRoutineArgs(arg, newthread);
-
-	int rc = 0;
+	int rc = -1;
 	PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT, origFunc,
 	                            PIN_PARG(int), &rc,
 	                            PIN_PARG(pthread_t*), newthread,
@@ -215,25 +180,59 @@ VOID PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
 	                            PIN_PARG(void *(*)(void *)), start_routine,
 	                            PIN_PARG(void*), arg,
 	                            PIN_PARG_END());
+	// currently, assume that threads are created without any error
+	EASSERT(rc == 0);
 
+	// wait for ThreadStart function of the child thread to start
+	int sleepCount = MAX_WAKEUP_COUNT;
+	while(lastCreatedThread == NOT_A_THREADID && sleepCount)
+	{
+		PIN_Sleep(50);
+		sleepCount--;
+	}
+	EASSERT_LOG(sleepCount != 0, "ThreadStart didn't started after pthread_create\n");
+
+	// write down the (pthread_t,THREADID) tuple
 	GetLock(&threadIdMapLock, tid + 1);
-	pthreadPinIdMap[*newthread] = globalCreatedThreadId;
-	globalCreatedThreadId++;
+	pthreadPinIdMap[*newthread] = lastCreatedThread;
+
+	// clear the created thread id
+	lastCreatedThread = NOT_A_THREADID;
 	ReleaseLock(&threadIdMapLock);
+
+	// write the previous epoch to the module
+	GetLock(&rdmLock, tid + 1);
+	printSignatures();
+#ifdef PRINT_SYNC_FUNCTION
+
+	fprintf(tls->out, "--- PTHREAD CREATE ---\n");
+#endif
+	// add current signature to the rdm
+	rdm.addSignature( new SigRaceData(tid, *tls->vectorClock,
+	                                  *tls->readBloomFilter, *tls->writeBloomFilter));
+	ReleaseLock(&rdmLock);
+
+	// get ready for the next epoch
+	tls->readBloomFilter->clear();
+	tls->writeBloomFilter->clear();
+	tls->vectorClock->advance();
 
 	ReleaseLock(&atomicCreate);
 }
 
-VOID BeforeJoin(THREADID tid, pthread_t thread, void **retval)
+VOID PthreadJoinReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
+                            pthread_t thread, void **retval)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
-	tls->lastPthreadId = thread;
-}
 
-VOID AfterJoin(THREADID tid, int returnValue)
-{
-	//  dump the current values
-	ThreadLocalStorage* tls = getTLS(tid);
+	int rc = -1;
+	PIN_CallApplicationFunction(ctxt, tid, CALLINGSTD_DEFAULT, origFunc,
+	                            PIN_PARG(int), &rc,
+	                            PIN_PARG(pthread_t), thread,
+	                            PIN_PARG(void**), retval,
+	                            PIN_PARG_END());
+	// currently, assume that threads are created without any error
+	EASSERT(rc == 0);
 
 	GetLock(&rdmLock, tid + 1);
 	printSignatures();
@@ -246,24 +245,30 @@ VOID AfterJoin(THREADID tid, int returnValue)
 	// add current signature to the rdm
 	rdm.addSignature(new SigRaceData(tid, *tls->vectorClock,
 	                                 *tls->readBloomFilter, *tls->writeBloomFilter));
-
-	tls->vectorClock->advance();
 	tls->readBloomFilter->clear();
 	tls->writeBloomFilter->clear();
 	ReleaseLock(&rdmLock);
 
 	GetLock(&threadIdMapLock, tid + 1);
-	PthreadPinIdMapItr itr = pthreadPinIdMap.find(tls->lastPthreadId);
-	assert(itr != pthreadPinIdMap.end());
+	PthreadPinIdMapItr itr = pthreadPinIdMap.find(thread);
+
+	int count = MAX_WAKEUP_COUNT;
+	while(itr == pthreadPinIdMap.end() && count)
+	{
+		ReleaseLock(&threadIdMapLock);
+		PIN_Sleep(SLEEP_DURATION);
+		count--;
+		GetLock(&threadIdMapLock, tid + 1);
+	}
+	EASSERT_LOG(count, "Couldn't get VC from joined thread");
+
 	THREADID joinTID = itr->second;
 
-	printf("JOIN %d <--- %d\n", tid, joinTID); // HERE
-
 	ChildVCMapItr childItr = tls->joinVCMap.find(joinTID);
-	assert(childItr != tls->joinVCMap.end());
+	EASSERT_LOG(childItr != tls->joinVCMap.end(), "cannot find joined thread's vc");
 	ReleaseLock(&threadIdMapLock);
 
-	tls->vectorClock->receiveAction(childItr->second);
+	tls->vectorClock->receiveWithIncrement(childItr->second);
 }
 
 VOID BeforeLock(THREADID tid, ADDRINT lockAddr)
@@ -530,7 +535,7 @@ VOID BeforeBarrierWait(THREADID tid, ADDRINT barrier)
 	{
 		barrierData = barrierQueueItr->second;
 	}
-	assert(barrierData);
+	EASSERT(barrierData);
 
 	printSignatures();
 	// add current signature to the rdm
@@ -596,7 +601,7 @@ VOID AfterBarrierWait(THREADID tid, int returnValue)
 	{
 		barrierData = barrierMapItr->second;
 	}
-	assert(barrierData != NULL);
+	EASSERT(barrierData != NULL);
 
 	tls->vectorClock->receiveAction(barrierData->previousVectorClock);
 
@@ -683,9 +688,7 @@ addInstrumentation(IMG img, const char * name, char position, int parameterCount
 
 		if(position & INSTRUMENT_BEFORE)
 		{
-			assert(beforeFUNPTR);
-
-			assert(parameterCount >=0 && parameterCount <=4);
+			EASSERT(beforeFUNPTR && parameterCount >=0 && parameterCount <=4);
 
 			switch(parameterCount)
 			{
@@ -724,7 +727,7 @@ addInstrumentation(IMG img, const char * name, char position, int parameterCount
 
 		if(position & INSTRUMENT_AFTER)
 		{
-			assert(afterFUNPTR);
+			EASSERT(afterFUNPTR);
 
 			RTN_InsertCall(rtn, IPOINT_AFTER, AFUNPTR(afterFUNPTR),
 			               IARG_THREAD_ID,
@@ -747,6 +750,8 @@ replaceSignature(IMG img, const char* originalFunctionName,
 		{
 		case __PTHREAD_CREATE__:
 			return RTN_ReplaceSignature(rtn, replacementFunction, PTHREAD_CREATE_ARGS);
+		case __PTHREAD_JOIN__:
+			return RTN_ReplaceSignature(rtn, replacementFunction, PTHREAD_JOIN_ARGS);
 		default:
 			return NULL;
 		}
@@ -783,8 +788,9 @@ VOID ImageLoad(IMG img, VOID *)
 		                 AFUNPTR(PthreadCreateReplacement),
 		                 __PTHREAD_CREATE__);
 
-		addInstrumentation(img, "pthread_join", INSTRUMENT_BOTH, 2,
-		                   AFUNPTR(BeforeJoin), AFUNPTR(AfterJoin));
+		replaceSignature(img, "pthread_join",
+		                 AFUNPTR(PthreadJoinReplacement),
+		                 __PTHREAD_JOIN__);
 
 		// lock, try-lock, unlock
 

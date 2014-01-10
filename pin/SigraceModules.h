@@ -40,13 +40,11 @@ public:
 
 	ThreadInfo() :
 			tid(NO_ID )
-	{
-	}
+	{}
 
 	ThreadInfo(UINT32 tid, const VectorClock& vc) :
 			tid(tid), vectorClock(vc)
-	{
-	}
+	{}
 
 	ThreadInfo& operator=(const ThreadInfo& other)
 	{
@@ -102,8 +100,7 @@ class SigRaceData
 public:
 	SigRaceData(int tid, VectorClock& ts, Bloom& r, Bloom& w) :
 			tid(tid), ts(ts), r(r), w(w)
-	{
-	}
+	{}
 
 	bool operator<(const SigRaceData& rhs)
 	{
@@ -130,8 +127,7 @@ class RaceDetectionModule
 public:
 	RaceDetectionModule() :
 			threadCount(0)
-	{
-	}
+	{}
 	~RaceDetectionModule()
 	{
 		while (!blockHistoryQueues.empty())
@@ -153,6 +149,12 @@ public:
 		{
 			return;
 		}
+
+#ifdef PRINT_SIGNATURES
+		cout << "---SIGNATURE" << endl << sigRaceData->ts <<
+				"read: " << sigRaceData->r <<
+				"write: " << sigRaceData->w << endl;
+#endif
 
 		// add it to the queue
 		BlockHistoryQueue* queue = blockHistoryQueues[sigRaceData->tid];
@@ -186,14 +188,16 @@ public:
 				if (sigRaceData->r.hasInCommon(other->w))
 				{
 					fprintf(stderr,
-							"THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
-							sigRaceData->tid, other->tid);
+					        "THERE MAY BE A DATA RACE r-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
+					        sigRaceData->tid, other->tid);
 #ifdef PRINT_DETAILED_RACE_INFO
+
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
 #endif
+
 					fflush(stderr);
 
 					goto OUTER_FOR;
@@ -201,34 +205,39 @@ public:
 				else if (sigRaceData->w.hasInCommon(other->r))
 				{
 					fprintf(stderr,
-							"THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
-							sigRaceData->tid, other->tid);
+					        "THERE MAY BE A DATA RACE w-r BETWEEN THREAD-%d & THREAD-%d !!!\n",
+					        sigRaceData->tid, other->tid);
 #ifdef PRINT_DETAILED_RACE_INFO
+
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
 #endif
+
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
 				else if (sigRaceData->w.hasInCommon(other->w))
 				{
 					fprintf(stderr,
-							"THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
-							sigRaceData->tid, other->tid);
+					        "THERE MAY BE A DATA RACE w-w BETWEEN THREAD-%d & THREAD-%d !!!\n",
+					        sigRaceData->tid, other->tid);
 #ifdef PRINT_DETAILED_RACE_INFO
+
 					fprintf(stderr, "Thread %d VC:\n", sigRaceData->tid);
 					sigRaceData->ts.printVector(stderr);
 					fprintf(stderr, "Thread %d VC:\n", other->tid);
 					other->ts.printVector(stderr);
 #endif
+
 					fflush(stderr);
 					goto OUTER_FOR;
 				}
 			}
 		}
-		OUTER_FOR: return;
+OUTER_FOR:
+		return;
 	}
 
 	void addProcessor()
@@ -247,17 +256,17 @@ private:
 		std::string fileName;
 
 		fprintf(stderr,
-				"-----------------------RACE INFO STARTS-----------------------------");
+		        "-----------------------RACE INFO STARTS-----------------------------");
 
 		GetLock(&fileLock, PIN_ThreadId() + 1);
 		fprintf(stderr,
-				"There may be a data race (%s) between thread-%d & thread-%d !!!\n",
-				type.c_str(), thread1, thread2);
+		        "There may be a data race (%s) between thread-%d & thread-%d !!!\n",
+		        type.c_str(), thread1, thread2);
 		PIN_GetSourceLocation(insPtr, &col, &lineNumber, &fileName);
 		fprintf(stderr, "The Exact Place: %s @ %d\n", fileName.c_str(),
-				lineNumber);
+		        lineNumber);
 		fprintf(stderr,
-				"-----------------------RACE INFO ENDS-------------------------------");
+		        "-----------------------RACE INFO ENDS-------------------------------");
 		fflush(stderr);
 	}
 
@@ -277,13 +286,11 @@ public:
 
 	MemoryArea() :
 			tid(0), from(0), to(0)
-	{
-	}
+	{}
 
 	MemoryArea(THREADID tid, ADDRINT from, ADDRINT to) :
 			tid(tid), from(from), to(to)
-	{
-	}
+	{}
 
 	MemoryArea(const MemoryArea& rhs)
 	{
