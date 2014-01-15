@@ -37,17 +37,17 @@ public:
 	void receiveAction(VectorClock& vectorClockReceived);
 	void receiveWithIncrement(VectorClock& vectorClockReceived);
 	void receiveActionFromSpecialPoint(VectorClock& vectorClockReceived,
-			UINT32 specialPoint);
+	                                   UINT32 specialPoint);
 	void sendEvent();
 	void set(int index, UINT32 value);
 	UINT32 get();
 	void clear();
 
 	// happens-before functions
-	bool happensBefore(const VectorClock& input); //OK
-	bool happensBeforeSpecial(const VectorClock* input, UINT32 processId);
-	bool areConcurrent(VectorClock& vectorClockReceived, ADDRINT processId);
-	bool isUniqueValue(int processIdIn);
+	bool happensBefore(const VectorClock& input) const; //OK
+	bool happensBeforeSpecial(const VectorClock* input, UINT32 processId) const;
+	bool isConcurrent(const VectorClock& vectorClockReceived) const;
+	bool isUniqueValue(int processIdIn) const;
 
 	// re-execute helper methods
 	bool lessThanGRT(const VectorClock& GRT);
@@ -57,10 +57,10 @@ public:
 	VectorClock& operator++(); //prefix increment ++vclock
 	VectorClock operator++(int x); //postfix increment
 	const VectorClock& operator=(const VectorClock& vcRight);
-	bool operator==(const VectorClock &vRight);
-	bool operator!=(const VectorClock &vRight);
-	bool operator<(const VectorClock& vRight);
-	bool operator<=(const VectorClock& vRight);
+	bool operator==(const VectorClock &vRight) const;
+	bool operator!=(const VectorClock &vRight) const;
+	bool operator<(const VectorClock& vRight) const;
+	bool operator<=(const VectorClock& vRight) const;
 	friend ostream& operator<<(ostream& os, const VectorClock &v);
 
 	// utilities

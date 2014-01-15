@@ -107,6 +107,11 @@ public:
 		return ts.happensBefore(rhs.ts);
 	}
 
+	bool isConcurrent(const SigRaceData& rhs) const
+	{
+		return ts.isConcurrent(rhs.ts);
+	}
+
 	bool isDirty()
 	{
 		return !r.isEmpty() || !w.isEmpty();
@@ -152,8 +157,8 @@ public:
 
 #ifdef PRINT_SIGNATURES
 		cout << "---SIGNATURE" << endl << sigRaceData->ts <<
-				"read: " << sigRaceData->r <<
-				"write: " << sigRaceData->w << endl;
+		"read: " << sigRaceData->r <<
+		"write: " << sigRaceData->w << endl;
 #endif
 
 		// add it to the queue
@@ -179,8 +184,9 @@ public:
 			for (itr = queue->begin(); itr != queue->end(); itr++)
 			{
 				other = *itr;
+
 				// rest is already HB this one
-				if (*other < *sigRaceData)
+				if (! sigRaceData->isConcurrent(*other))
 				{
 					break;
 				}

@@ -110,7 +110,11 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	// create the log file
 	PIN_SetThreadData(tlsKey, tls, tid);
 
+	cout << "THREAD START FINISHED - " << tid << endl;
+
 	ReleaseLock(&threadIdMapLock);
+
+
 }
 
 // This routine is executed every time a thread is destroyed.
@@ -122,7 +126,6 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 	}
 
 	ThreadLocalStorage* tls = getTLS(tid);
-	FILE* out = tls->out;
 	VectorClock* vectorClock = tls->vectorClock;
 	Bloom* readFilter = tls->readBloomFilter;
 	Bloom* writeFilter = tls->writeBloomFilter;
@@ -152,10 +155,12 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 
 	ReleaseLock(&threadIdMapLock);
 
+#ifdef DELETE_TLS_AFTER_FINI
 	// deallocate the memory used by the thread
-	fclose(out);
 	delete tls;
 	PIN_SetThreadData(tlsKey, 0, tid);
+#endif
+
 }
 
 /*

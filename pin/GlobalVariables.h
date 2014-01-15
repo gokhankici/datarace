@@ -63,9 +63,17 @@ public:
 
 	~ThreadLocalStorage()
 	{
-		delete vectorClock;
-		delete readBloomFilter;
-		delete writeBloomFilter;
+		if(out)
+			fclose(out);
+
+		if(vectorClock)
+			delete vectorClock;
+
+		if(readBloomFilter)
+			delete readBloomFilter;
+
+		if(writeBloomFilter)
+			delete writeBloomFilter;
 	}
 };
 

@@ -149,12 +149,12 @@ void VectorClock::receiveActionFromSpecialPoint(
 	vc[specialPoint] = receivedClockValues[specialPoint];
 }
 
-bool VectorClock::happensBefore(const VectorClock& input)
+bool VectorClock::happensBefore(const VectorClock& input) const
 {
 	return (*this < input);
 }
 
-bool VectorClock::isUniqueValue(int processIdIn)
+bool VectorClock::isUniqueValue(int processIdIn) const
 {
 	bool isUnique = true;
 	for (int i = 0; i < totalProcessCount; ++i)
@@ -181,7 +181,7 @@ bool VectorClock::isEmpty()
 }
 
 bool VectorClock::happensBeforeSpecial(const VectorClock* input,
-                                       UINT32 processId)
+                                       UINT32 processId) const
 {
 	UINT32* vRightValues = input->vc;
 	for (int i = 0; i < totalProcessCount; ++i)
@@ -198,7 +198,7 @@ bool VectorClock::happensBeforeSpecial(const VectorClock* input,
 	return false;
 }
 
-bool VectorClock::areConcurrent(VectorClock& input, ADDRINT processId)
+bool VectorClock::isConcurrent(const VectorClock& input) const
 {
 	return !happensBefore(input) && !input.happensBefore(*this);
 }
@@ -254,32 +254,12 @@ VectorClock VectorClock::operator++(int)
 	return tmp;
 }
 
-bool VectorClock::operator<=(const VectorClock& vRight)
+bool VectorClock::operator<=(const VectorClock& vRight)  const
 {
 	return operator<(vRight) || operator==(vRight);
 }
 
-/*
- bool VectorClock::operator<(const VectorClock& vRight)
- {
- bool strictlySmaller = false;
- UINT32* vRightValues = vRight.getValues();
- for (int i = 0; i < totalProcessCount; ++i)
- {
- //at least ONE value is stricly smaller
- if (v[i] < vRightValues[i])
- strictlySmaller = true;
- //if any value of v[i] is greater, than no way v<vRight
- else if (v[i] > vRightValues[i])
- return false;
- }
-
- //if there happened strictlySmaller, then smaller operation returns true;
- return strictlySmaller;
- }
- */
-
-bool VectorClock::operator<(const VectorClock& vRight)
+bool VectorClock::operator<(const VectorClock& vRight) const
 {
 	if (threadId == vRight.threadId)
 	{
@@ -295,12 +275,12 @@ bool VectorClock::operator<(const VectorClock& vRight)
 	return l_l < r_l && l_r < r_r;
 }
 
-bool VectorClock::operator!=(const VectorClock& vRight)
+bool VectorClock::operator!=(const VectorClock& vRight) const
 {
 	return !(operator==(vRight));
 }
 
-bool VectorClock::operator==(const VectorClock& vRight)
+bool VectorClock::operator==(const VectorClock& vRight) const
 {
 	UINT32 *vRightValues = vRight.vc;
 	for (int i = 0; i < totalProcessCount; ++i)

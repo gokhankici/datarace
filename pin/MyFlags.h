@@ -27,8 +27,10 @@
 #define PRINT_DETAILED_RACE_INFO
 #endif
 
+//#define DELETE_TLS_AFTER_FINI
+
 //#define PRINT_SYNC_FUNCTION
 
-#define PRINT_SIGNATURES
+//#define PRINT_SIGNATURES
 
 #endif /* MYDEFINITIONS_H_ */
