@@ -110,11 +110,7 @@ VOID ThreadStart(THREADID tid, CONTEXT *ctxt, INT32 flags, VOID *v)
 	// create the log file
 	PIN_SetThreadData(tlsKey, tls, tid);
 
-	cout << "THREAD START FINISHED - " << tid << endl;
-
 	ReleaseLock(&threadIdMapLock);
-
-
 }
 
 // This routine is executed every time a thread is destroyed.
@@ -166,7 +162,7 @@ VOID ThreadFini(THREADID tid, const CONTEXT *ctxt, INT32 code, VOID *v)
 /*
  * Replace the pthread_create function to handle the parent-child relationships
  */
-VOID PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
+int PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
                               pthread_t *__restrict newthread,
                               __const pthread_attr_t *__restrict attr,
                               void *(*start_routine)(void *),
@@ -223,9 +219,11 @@ VOID PthreadCreateReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
 	tls->vectorClock->advance();
 
 	ReleaseLock(&atomicCreate);
+
+	return rc;
 }
 
-VOID PthreadJoinReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
+int PthreadJoinReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
                             pthread_t thread, void **retval)
 {
 	ThreadLocalStorage* tls = getTLS(tid);
@@ -274,6 +272,8 @@ VOID PthreadJoinReplacement(THREADID tid, CONTEXT *ctxt, AFUNPTR origFunc,
 	ReleaseLock(&threadIdMapLock);
 
 	tls->vectorClock->receiveWithIncrement(childItr->second);
+
+	return rc;
 }
 
 VOID BeforeLock(THREADID tid, ADDRINT lockAddr)

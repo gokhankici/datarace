@@ -124,3 +124,6 @@ $(TOOLS): %$(PINTOOL_SUFFIX) : %.o $(MY_OBJS)
 clean:
 	rm -rf $(OBJDIR) *.out *.tested *.failed makefile.copy
 	make -C MultiCacheSim-dist/ clean
+
+ccc: clean
+	rm -f thread_epochs.* create.txt
